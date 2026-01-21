@@ -201,3 +201,15 @@
 
 # Keep Timber logging
 -dontwarn timber.log.**
+
+# Keep Java beans for JavaScript conversion
+-keep class java.beans.** { *; }
+-dontwarn java.beans.**
+
+# Keep JavaScript engine classes
+-keep class javax.script.** { *; }
+-dontwarn javax.script.**
+
+# Keep re2j regex classes
+-keep class com.google.re2j.** { *; }
+-dontwarn com.google.re2j.**

@@ -349,7 +349,7 @@ fun WelcomePage() {
                 ),
             )
             Text(
-                text = "PixelPlayer",
+                text = "PixelPlayer+",
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontFamily = GoogleSansRounded,
                     fontSize = 46.sp,
@@ -466,7 +466,7 @@ fun MediaPermissionPage(uiState: SetupUiState) {
     PermissionPageLayout(
         title = "Media Permission",
         granted = isGranted,
-        description = "PixelPlayer needs access to your audio files to build your music library.",
+        description = "PixelPlayer+ needs access to your audio files to build your music library.",
         buttonText = if (isGranted) "Permission Granted" else "Grant Media Permission",
         icons = mediaIcons,
         onGrantClicked = {
@@ -545,7 +545,7 @@ fun BatteryOptimizationPage(
     PermissionPageLayout(
         title = "Battery Optimization",
         granted = isIgnoringBatteryOptimizations,
-        description = "Some Android devices aggressively kill background apps. Disable battery optimization for PixelPlayer to prevent unexpected playback interruptions.",
+        description = "Some Android devices aggressively kill background apps. Disable battery optimization for PixelPlayer+ to prevent unexpected playback interruptions.",
         buttonText = if (isIgnoringBatteryOptimizations) "Permission Granted" else "Disable Optimization",
         icons = batteryIcons,
         onGrantClicked = {

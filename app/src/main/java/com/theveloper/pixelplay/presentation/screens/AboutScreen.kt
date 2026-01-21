@@ -314,7 +314,7 @@ fun AboutScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "PixelPlayer",
+                            text = "PixelPlayer+",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold
                         )
@@ -360,7 +360,7 @@ fun AboutScreen(
                             .padding(horizontal = 24.dp, vertical = 20.dp)
                     ) {
                         Text(
-                            text = "Thanks for using PixelPlayer!",
+                            text = "Thanks for using PixelPlayer+!",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,

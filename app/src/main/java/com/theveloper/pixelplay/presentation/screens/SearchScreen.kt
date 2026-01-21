@@ -134,8 +134,8 @@ fun SearchScreen(
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     var selectedSongForInfo by remember { mutableStateOf<Song?>(null) }
 
-    // Perform search whenever searchQuery, active state, filter, or search mode changes
-    LaunchedEffect(searchQuery, active, currentFilter, searchMode) {
+    // Perform search whenever searchQuery, active state, or filter changes
+    LaunchedEffect(searchQuery, active, currentFilter) {
         if (searchQuery.isNotBlank()) {
             playerViewModel.performSearch(searchQuery)
         } else if (active) {
@@ -151,7 +151,7 @@ fun SearchScreen(
 
     val searchbarHorizontalPadding by animateDpAsState(
         targetValue = if (!active) 24.dp else 0.dp,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMedium), // Ajusta la animación si es necesario
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh),
         label = "searchbarHorizontalPadding"
     )
 

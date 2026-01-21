@@ -550,7 +550,7 @@ fun SettingsCategoryScreen(
                         }
                         SettingsCategory.ABOUT -> {
                              SettingsItem(
-                                title = "About PixelPlayer",
+                                title = "About PixelPlayer+",
                                 subtitle = "App version, credits, and more.",
                                 leadingIcon = { Icon(Icons.Outlined.Info, null, tint = MaterialTheme.colorScheme.secondary) },
                                 trailingIcon = { Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },

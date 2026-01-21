@@ -4846,39 +4846,41 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun playPause() {
-        viewModelScope.launch {
-            val castSession = _castSession.value
-            if (castSession != null && castSession.remoteMediaClient != null) {
-                val remoteMediaClient = castSession.remoteMediaClient!!
-                if (remoteMediaClient.isPlaying) {
-                    castPlayer?.pause()
+        val castSession = _castSession.value
+        if (castSession != null && castSession.remoteMediaClient != null) {
+            val remoteMediaClient = castSession.remoteMediaClient!!
+            if (remoteMediaClient.isPlaying) {
+                castPlayer?.pause()
+            } else {
+                // If there are items in the remote queue, just play.
+                // Otherwise, load the current local queue to the remote player.
+                if (remoteMediaClient.mediaQueue != null && remoteMediaClient.mediaQueue.itemCount > 0) {
+                    castPlayer?.play()
                 } else {
-                    // If there are items in the remote queue, just play.
-                    // Otherwise, load the current local queue to the remote player.
-                    if (remoteMediaClient.mediaQueue != null && remoteMediaClient.mediaQueue.itemCount > 0) {
-                        castPlayer?.play()
-                    } else {
-                        val queue = _playerUiState.value.currentPlaybackQueue
-                        if (queue.isNotEmpty()) {
-                            val startSong = _stablePlayerState.value.currentSong ?: queue.first()
+                    val queue = _playerUiState.value.currentPlaybackQueue
+                    if (queue.isNotEmpty()) {
+                        val startSong = _stablePlayerState.value.currentSong ?: queue.first()
+                        viewModelScope.launch {
                             internalPlaySongs(queue.toList(), startSong, _playerUiState.value.currentQueueSourceName)
                         }
                     }
                 }
-            } else {
-                mediaController?.let { controller ->
-                    if (controller.isPlaying) {
-                        controller.pause()
-                    } else {
-                        if (controller.currentMediaItem == null) {
-                            val currentQueue = _playerUiState.value.currentPlaybackQueue
-                            val currentSong = _stablePlayerState.value.currentSong
-                            when {
-                                currentQueue.isNotEmpty() && currentSong != null -> {
-                                    // Set loading state for YouTube songs
-                                    if (YouTubeToSongMapper.isYouTubeSong(currentSong)) {
-                                        _isLoading.value = true
-                                    }
+            }
+        } else {
+            mediaController?.let { controller ->
+                if (controller.isPlaying) {
+                    controller.pause()
+                } else {
+                    if (controller.currentMediaItem == null) {
+                        val currentQueue = _playerUiState.value.currentPlaybackQueue
+                        val currentSong = _stablePlayerState.value.currentSong
+                        when {
+                            currentQueue.isNotEmpty() && currentSong != null -> {
+                                // Set loading state for YouTube songs
+                                if (YouTubeToSongMapper.isYouTubeSong(currentSong)) {
+                                    _isLoading.value = true
+                                }
+                                viewModelScope.launch {
                                     transitionSchedulerJob?.cancel()
                                     internalPlaySongs(
                                         currentQueue.toList(),
@@ -4886,28 +4888,28 @@ class PlayerViewModel @Inject constructor(
                                         _playerUiState.value.currentQueueSourceName
                                     )
                                 }
-                                currentSong != null -> {
-                                    // Set loading state for YouTube songs
-                                    if (YouTubeToSongMapper.isYouTubeSong(currentSong)) {
-                                        _isLoading.value = true
-                                    }
-                                    loadAndPlaySong(currentSong)
-                                }
-                                _playerUiState.value.allSongs.isNotEmpty() -> {
-                                    val firstSong = _playerUiState.value.allSongs.first()
-                                    // Set loading state for YouTube songs
-                                    if (YouTubeToSongMapper.isYouTubeSong(firstSong)) {
-                                        _isLoading.value = true
-                                    }
-                                    loadAndPlaySong(firstSong)
-                                }
-                                else -> {
-                                    controller.play()
-                                }
                             }
-                        } else {
-                            controller.play()
+                            currentSong != null -> {
+                                // Set loading state for YouTube songs
+                                if (YouTubeToSongMapper.isYouTubeSong(currentSong)) {
+                                    _isLoading.value = true
+                                }
+                                loadAndPlaySong(currentSong)
+                            }
+                            _playerUiState.value.allSongs.isNotEmpty() -> {
+                                val firstSong = _playerUiState.value.allSongs.first()
+                                // Set loading state for YouTube songs
+                                if (YouTubeToSongMapper.isYouTubeSong(firstSong)) {
+                                    _isLoading.value = true
+                                }
+                                loadAndPlaySong(firstSong)
+                            }
+                            else -> {
+                                controller.play()
+                            }
                         }
+                    } else {
+                        controller.play()
                     }
                 }
             }
