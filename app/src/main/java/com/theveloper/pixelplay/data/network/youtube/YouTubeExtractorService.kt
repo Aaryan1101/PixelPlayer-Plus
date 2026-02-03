@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.data.network.youtube
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.stream.StreamExtractor
@@ -9,6 +10,8 @@ import org.schabi.newpipe.extractor.stream.StreamType
 import org.schabi.newpipe.extractor.search.SearchExtractor
 import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.Page
+import org.schabi.newpipe.extractor.NewPipe
+import org.schabi.newpipe.extractor.downloader.Downloader
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,6 +20,27 @@ import javax.inject.Singleton
 class YouTubeExtractorService @Inject constructor() {
 
     private val youtubeService = ServiceList.YouTube
+    private var lastReinitTime = 0L
+    private val REINIT_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
+    private val ytDlpService = YtDlpService()
+
+    /**
+     * Re-initialize NewPipe if needed (to handle rate limiting/blocks)
+     */
+    private suspend fun reinitializeNewPipeIfNeeded() = withContext(Dispatchers.IO) {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastReinitTime > REINIT_INTERVAL_MS) {
+            try {
+                Timber.d("YouTubeExtractor: Re-initializing NewPipe...")
+                val downloader = OkHttpDownloader.getInstance()
+                NewPipe.init(downloader)
+                lastReinitTime = currentTime
+                Timber.d("YouTubeExtractor: NewPipe re-initialized successfully")
+            } catch (e: Exception) {
+                Timber.e(e, "YouTubeExtractor: Failed to re-initialize NewPipe")
+            }
+        }
+    }
 
     /**
      * Search for songs on YouTube
@@ -116,59 +140,130 @@ suspend fun getStreamInfo(videoUrl: String): Result<StreamExtractor> = withConte
 }
 
     /**
-     * Get direct audio stream URL for a YouTube video
+     * Get direct audio stream URL for a YouTube video with multiple fallbacks
      * @param videoUrl YouTube video URL or ID
      * @return Direct audio stream URL
      */
     suspend fun getStreamUrl(videoUrl: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            Timber.d("YouTubeExtractor: Getting stream URL for: $videoUrl")
-            
-            val streamInfoResult = getStreamInfo(videoUrl)
-            
-            if (streamInfoResult.isFailure) {
-                val error = streamInfoResult.exceptionOrNull()
-                Timber.e("YouTubeExtractor: Failed to get stream info", error)
-                return@withContext Result.failure(
-                    streamInfoResult.exceptionOrNull() ?: Exception("Failed to get stream info")
-                )
-            }
-            
-            val streamExtractor = streamInfoResult.getOrThrow()
-            
-            // Get the best audio stream (highest bitrate)
-            val audioStreams = streamExtractor.audioStreams
-            Timber.d("YouTubeExtractor: Found ${audioStreams.size} audio streams")
-            
-            // Try to get the best audio stream
-            val audioStream = audioStreams
-                .filter { it.content != null && it.content.isNotEmpty() }
-                .maxByOrNull { it.averageBitrate ?: 0 }
-            
-            if (audioStream != null && audioStream.content.isNotEmpty()) {
-                val streamUrl = audioStream.content
-                Timber.d("YouTubeExtractor: Got audio stream URL: ${streamUrl.take(100)}..., bitrate: ${audioStream.averageBitrate}")
-                Result.success(streamUrl)
-            } else {
-                // Log details of all streams for debugging
-                Timber.e("YouTubeExtractor: No valid audio stream available. Total streams: ${audioStreams.size}")
-                audioStreams.forEachIndexed { index, stream ->
-                    Timber.d("YouTubeExtractor: Stream $index - content: ${stream.content?.take(50)}, bitrate: ${stream.averageBitrate}, format: ${stream.format}")
+        val maxRetries = 3
+        var lastError: Exception? = null
+        
+        // Try NewPipe first with retries
+        repeat(maxRetries) { attempt ->
+            try {
+                Timber.d("YouTubeExtractor: Getting stream URL for: $videoUrl (attempt ${attempt + 1}/$maxRetries)")
+                
+                // Re-initialize NewPipe if needed
+                reinitializeNewPipeIfNeeded()
+                
+                val streamInfoResult = getStreamInfo(videoUrl)
+                
+                if (streamInfoResult.isFailure) {
+                    val error = streamInfoResult.exceptionOrNull() as? Exception
+                    lastError = error ?: Exception("Failed to get stream info")
+                    Timber.w("YouTubeExtractor: Attempt ${attempt + 1} failed", lastError)
+                    
+                    // Wait before retry (exponential backoff)
+                    if (attempt < maxRetries - 1) {
+                        delay(1000L * (attempt + 1)) // 1s, 2s, 3s delays
+                    }
+                    return@repeat
                 }
                 
-                // Try fallback: use any stream with content, even if bitrate is null
-                val fallbackStream = audioStreams.find { it.content != null && it.content.isNotEmpty() }
-                if (fallbackStream != null) {
-                    Timber.w("YouTubeExtractor: Using fallback audio stream")
-                    Result.success(fallbackStream.content)
+                val streamExtractor = streamInfoResult.getOrThrow()
+                
+                // Get the best audio stream (prioritize full-length over bitrate)
+                val audioStreams = streamExtractor.audioStreams
+                Timber.d("YouTubeExtractor: Found ${audioStreams.size} audio streams")
+                
+                // Filter for audio streams and prioritize full-length content
+                val validAudioStreams = audioStreams
+                    .filter { it.content != null && it.content.isNotEmpty() }
+                
+                // Log all available streams for debugging
+                Timber.d("YouTubeExtractor: Available audio streams:")
+                validAudioStreams.forEachIndexed { index, stream ->
+                    Timber.d("YouTubeExtractor: Stream $index - bitrate: ${stream.averageBitrate}, format: ${stream.format}, itag: ${stream.itag}")
+                }
+                
+                // Try to get full-length audio stream (avoid previews/short clips)
+                val audioStream = try {
+                    // Prioritize medium bitrate streams (likely full songs) over very high bitrate (likely previews)
+                    val mediumBitrateStreams = validAudioStreams.filter { 
+                        it.averageBitrate != null && it.averageBitrate!! in 50..300 
+                    }
+                    val highBitrateStreams = validAudioStreams.filter { 
+                        it.averageBitrate != null && it.averageBitrate!! > 300 
+                    }
+                    val lowBitrateStreams = validAudioStreams.filter { 
+                        it.averageBitrate == null || it.averageBitrate!! < 50 
+                    }
+                    
+                    // Try medium bitrate first (likely full songs), then low, then high (previews)
+                    mediumBitrateStreams.maxByOrNull { it.averageBitrate ?: 0 }
+                        ?: lowBitrateStreams.maxByOrNull { it.averageBitrate ?: 0 }
+                        ?: highBitrateStreams.maxByOrNull { it.averageBitrate ?: 0 }
+                } catch (e: Exception) {
+                    // Fallback to any stream if selection fails
+                    validAudioStreams.maxByOrNull { it.averageBitrate ?: 0 }
+                }
+                
+                if (audioStream != null && audioStream.content.isNotEmpty()) {
+                    val streamUrl = audioStream.content
+                    Timber.d("YouTubeExtractor: Got audio stream URL: ${streamUrl.take(100)}..., bitrate: ${audioStream.averageBitrate}, format: ${audioStream.format}")
+                    return@withContext Result.success(streamUrl)
                 } else {
-                    Result.failure(Exception("No audio stream available"))
+                    // Log details of all streams for debugging
+                    Timber.e("YouTubeExtractor: No valid audio stream available. Total streams: ${audioStreams.size}")
+                    audioStreams.forEachIndexed { index, stream ->
+                        Timber.d("YouTubeExtractor: Stream $index - content: ${stream.content?.take(50)}, bitrate: ${stream.averageBitrate}, format: ${stream.format}")
+                    }
+                    
+                    // Try fallback: use any stream with content, even if bitrate is null
+                    val fallbackStream = audioStreams.find { it.content != null && it.content.isNotEmpty() }
+                    if (fallbackStream != null) {
+                        Timber.w("YouTubeExtractor: Using fallback audio stream")
+                        return@withContext Result.success(fallbackStream.content)
+                    } else {
+                        lastError = Exception("No audio stream available")
+                        Timber.e("YouTubeExtractor: No audio stream available", lastError)
+                    }
+                }
+            } catch (e: Exception) {
+                lastError = e
+                Timber.e(e, "YouTubeExtractor: Attempt ${attempt + 1} failed for: $videoUrl")
+                
+                // Wait before retry (exponential backoff)
+                if (attempt < maxRetries - 1) {
+                    delay(1000L * (attempt + 1)) // 1s, 2s, 3s delays
                 }
             }
-        } catch (e: Exception) {
-            Timber.e(e, "YouTubeExtractor: Error getting stream URL: $videoUrl")
-            Result.failure(e)
         }
+        
+        // NewPipe failed, try yt-dlp as fallback
+        Timber.w("YouTubeExtractor: All NewPipe attempts failed, trying yt-dlp fallback")
+        
+        try {
+            val ytDlpAvailable = ytDlpService.isYtDlpAvailable()
+            if (ytDlpAvailable) {
+                val ytDlpResult = ytDlpService.getStreamUrl(videoUrl)
+                if (ytDlpResult.isSuccess) {
+                    val streamUrl = ytDlpResult.getOrThrow()
+                    Timber.d("YouTubeExtractor: yt-dlp fallback succeeded: ${streamUrl.take(100)}...")
+                    return@withContext Result.success(streamUrl)
+                } else {
+                    Timber.w("YouTubeExtractor: yt-dlp fallback failed", ytDlpResult.exceptionOrNull())
+                }
+            } else {
+                Timber.w("YouTubeExtractor: yt-dlp not available for fallback")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "YouTubeExtractor: Error during yt-dlp fallback")
+        }
+        
+        // All methods failed
+        Timber.e("YouTubeExtractor: All extraction methods failed for: $videoUrl", lastError)
+        Result.failure(lastError ?: Exception("All extraction methods failed"))
     }
 
     /**

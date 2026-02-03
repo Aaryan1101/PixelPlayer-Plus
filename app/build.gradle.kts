@@ -305,7 +305,7 @@ dependencies {
     implementation(libs.androidx.app.projected)
 
     // NewPipe Extractor for YouTube audio extraction
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.0")
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1")
 
 }
 

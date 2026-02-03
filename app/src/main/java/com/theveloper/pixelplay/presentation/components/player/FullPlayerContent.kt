@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.util.UnstableApi
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
@@ -97,8 +98,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.res.stringResource
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.R
+import com.theveloper.pixelplay.presentation.components.DownloadButton
+import com.theveloper.pixelplay.presentation.components.SmallDownloadButton
 import com.theveloper.pixelplay.data.model.Artist
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.CarouselStyle
@@ -161,7 +163,12 @@ fun FullPlayerContent(
     onShowCastClicked: () -> Unit,
     onShuffleToggle: () -> Unit,
     onRepeatToggle: () -> Unit,
-    onFavoriteToggle: () -> Unit
+    onFavoriteToggle: () -> Unit,
+    onDownloadClick: () -> Unit,
+    isDownloading: Boolean = false,
+    downloadProgress: Float = 0f,
+    isDownloadComplete: Boolean = false,
+    hasDownloadError: Boolean = false
 ) {
     var retainedSong by remember { mutableStateOf(currentSong) }
     LaunchedEffect(currentSong?.id) {
@@ -382,7 +389,12 @@ fun FullPlayerContent(
                     isFavoriteProvider = isFavoriteProvider,
                     onShuffleToggle = onShuffleToggle,
                     onRepeatToggle = onRepeatToggle,
-                    onFavoriteToggle = onFavoriteToggle
+                    onFavoriteToggle = onFavoriteToggle,
+                    onDownloadClick = onDownloadClick,
+                    isDownloading = isDownloading,
+                    downloadProgress = downloadProgress,
+                    isDownloadComplete = isDownloadComplete,
+                    hasDownloadError = hasDownloadError
                 )
             }
         }
@@ -1430,7 +1442,12 @@ private fun BottomToggleRow(
     isFavoriteProvider: () -> Boolean,
     onShuffleToggle: () -> Unit,
     onRepeatToggle: () -> Unit,
-    onFavoriteToggle: () -> Unit
+    onFavoriteToggle: () -> Unit,
+    onDownloadClick: () -> Unit,
+    isDownloading: Boolean = false,
+    downloadProgress: Float = 0f,
+    isDownloadComplete: Boolean = false,
+    hasDownloadError: Boolean = false
 ) {
     val isFavorite = isFavoriteProvider()
     val rowCorners = 60.dp
@@ -1512,6 +1529,21 @@ private fun BottomToggleRow(
                 iconId = R.drawable.round_favorite_24,
                 contentDesc = "Favorito"
             )
+            
+            // Download Button
+            Box(
+                modifier = commonModifier,
+                contentAlignment = Alignment.Center
+            ) {
+                SmallDownloadButton(
+                    isDownloading = isDownloading,
+                    progress = downloadProgress,
+                    isComplete = isDownloadComplete,
+                    hasError = hasDownloadError,
+                    onDownloadClick = onDownloadClick,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }

@@ -42,6 +42,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -154,6 +155,7 @@ fun DailyMixScreen(
 
     if (showSongInfoSheet && selectedSongForInfo != null) {
         val song = selectedSongForInfo!!
+        val coroutineScope = rememberCoroutineScope()
         val removeFromListTrigger = remember(dailyMixSongs) {
             {
                 playerViewModel.removeFromDailyMix(song.id)
@@ -195,7 +197,14 @@ fun DailyMixScreen(
             generateAiMetadata = { fields ->
                 playerViewModel.generateAiMetadata(song, fields)
             },
-            removeFromListTrigger = removeFromListTrigger
+            removeFromListTrigger = removeFromListTrigger,
+            onDownloadSong = { 
+                playerViewModel.downloadYouTubeSong(song)
+            },
+            isDownloading = playerViewModel.getDownloadState(song.id).isDownloading,
+            downloadProgress = playerViewModel.getDownloadState(song.id).progress,
+            isDownloadComplete = playerViewModel.isSongDownloaded(song),
+            hasDownloadError = playerViewModel.getDownloadState(song.id).error != null
         )
 
         if (showPlaylistBottomSheet) {

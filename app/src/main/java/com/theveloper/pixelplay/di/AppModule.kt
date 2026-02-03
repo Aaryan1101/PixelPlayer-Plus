@@ -23,6 +23,9 @@ import com.theveloper.pixelplay.data.network.deezer.DeezerApiService
 import com.theveloper.pixelplay.data.network.lyrics.LrcLibApiService
 import com.theveloper.pixelplay.data.network.piped.PipedApiService
 import com.theveloper.pixelplay.data.network.youtube.YouTubeExtractorService
+import com.theveloper.pixelplay.data.network.youtube.YouTubeDownloadService
+import com.theveloper.pixelplay.data.network.youtube.YtDlpService
+import com.theveloper.pixelplay.data.network.youtube.OkHttpDownloader
 import com.theveloper.pixelplay.data.repository.ArtistImageRepository
 import com.theveloper.pixelplay.data.repository.LyricsRepository
 import com.theveloper.pixelplay.data.repository.LyricsRepositoryImpl
@@ -383,11 +386,24 @@ object AppModule {
     }
 
     /**
-     * Provee el servicio de extracción de YouTube usando NewPipe Extractor.
+     * Provide YouTubeExtractorService instance
      */
     @Provides
     @Singleton
     fun provideYouTubeExtractorService(): YouTubeExtractorService {
         return YouTubeExtractorService()
+    }
+
+    /**
+     * Provee una instancia singleton del servicio de descarga de YouTube.
+     */
+    @Provides
+    @Singleton
+    fun provideYouTubeDownloadService(
+        @ApplicationContext context: Context,
+        youTubeExtractorService: YouTubeExtractorService,
+        @FastOkHttpClient okHttpClient: OkHttpClient
+    ): YouTubeDownloadService {
+        return YouTubeDownloadService(context, youTubeExtractorService, okHttpClient)
     }
 }

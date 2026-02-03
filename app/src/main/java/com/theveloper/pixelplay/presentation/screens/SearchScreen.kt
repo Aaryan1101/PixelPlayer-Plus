@@ -49,6 +49,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -427,6 +428,7 @@ fun SearchScreen(
 
     if (showSongInfoBottomSheet && selectedSongForInfo != null) {
         val currentSong = selectedSongForInfo
+        val coroutineScope = rememberCoroutineScope()
         val isFavorite = remember(currentSong?.id, favoriteSongIds) {
             derivedStateOf {
                 currentSong?.let { favoriteSongIds.contains(it.id) }
@@ -486,6 +488,13 @@ fun SearchScreen(
                 generateAiMetadata = { fields ->
                     playerViewModel.generateAiMetadata(currentSong, fields)
                 },
+                onDownloadSong = { 
+                    playerViewModel.downloadYouTubeSong(currentSong)
+                },
+                isDownloading = playerViewModel.getDownloadState(currentSong.id).isDownloading,
+                downloadProgress = playerViewModel.getDownloadState(currentSong.id).progress,
+                isDownloadComplete = playerViewModel.isSongDownloaded(currentSong),
+                hasDownloadError = playerViewModel.getDownloadState(currentSong.id).error != null
             )
             if (showPlaylistBottomSheet) {
                 val playlistUiState by playlistViewModel.uiState.collectAsState()

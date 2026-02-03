@@ -321,7 +321,14 @@ fun ArtistDetailScreen(
                 generateAiMetadata = { fields ->
                     playerViewModel.generateAiMetadata(currentSong, fields)
                 },
-                removeFromListTrigger = removeFromListTrigger
+                removeFromListTrigger = removeFromListTrigger,
+                onDownloadSong = { 
+                    playerViewModel.downloadYouTubeSong(currentSong)
+                },
+                isDownloading = playerViewModel.getDownloadState(currentSong.id).isDownloading,
+                downloadProgress = playerViewModel.getDownloadState(currentSong.id).progress,
+                isDownloadComplete = playerViewModel.isSongDownloaded(currentSong),
+                hasDownloadError = playerViewModel.getDownloadState(currentSong.id).error != null
             )
             if (showPlaylistBottomSheet) {
                 val playlistUiState by playlistViewModel.uiState.collectAsState()

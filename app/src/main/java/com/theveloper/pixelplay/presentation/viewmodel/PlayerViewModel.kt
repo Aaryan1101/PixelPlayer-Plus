@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toBitmap
 import com.theveloper.pixelplay.data.model.LibraryTabId
+import com.theveloper.pixelplay.data.database.toSong
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -89,6 +90,9 @@ import com.theveloper.pixelplay.data.ai.AiPlaylistGenerator
 import com.theveloper.pixelplay.data.ai.SongMetadata
 import com.theveloper.pixelplay.data.database.AlbumArtThemeDao
 import com.theveloper.pixelplay.data.database.AlbumArtThemeEntity
+import com.theveloper.pixelplay.data.database.MusicDao
+import com.theveloper.pixelplay.data.database.SongEntity
+import com.theveloper.pixelplay.data.database.SearchHistoryDao
 import com.theveloper.pixelplay.data.database.StoredColorSchemeValues
 import com.theveloper.pixelplay.data.database.toComposeColor
 import com.theveloper.pixelplay.data.media.AudioMetadataReader
@@ -107,6 +111,8 @@ import com.theveloper.pixelplay.data.model.SearchHistoryItem
 import com.theveloper.pixelplay.data.model.SearchResultItem
 import com.theveloper.pixelplay.data.model.SearchMode
 import com.theveloper.pixelplay.data.network.youtube.YouTubeExtractorService
+import com.theveloper.pixelplay.data.network.youtube.YouTubeDownloadService
+import com.theveloper.pixelplay.data.model.DownloadState
 import com.theveloper.pixelplay.data.network.youtube.YouTubeToSongMapper
 import com.theveloper.pixelplay.di.FastOkHttpClient
 import okhttp3.OkHttpClient
@@ -294,6 +300,7 @@ private data class ActiveSession(
 class PlayerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val musicRepository: MusicRepository,
+    private val musicDao: MusicDao,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val albumArtThemeDao: AlbumArtThemeDao,
     val syncManager: SyncManager, // Inyectar SyncManager
@@ -306,7 +313,8 @@ class PlayerViewModel @Inject constructor(
     private val dualPlayerEngine: DualPlayerEngine,
     private val appShortcutManager: com.theveloper.pixelplay.utils.AppShortcutManager,
     @FastOkHttpClient private val okHttpClient: OkHttpClient,
-    private val youTubeExtractorService: YouTubeExtractorService
+    private val youTubeExtractorService: YouTubeExtractorService,
+    private val youTubeDownloadService: YouTubeDownloadService
 ) : ViewModel() {
 
     private val _playerUiState = MutableStateFlow(PlayerUiState())
@@ -334,6 +342,14 @@ class PlayerViewModel @Inject constructor(
     val bottomBarHeight: StateFlow<Int> = _bottomBarHeight.asStateFlow()
     private val _predictiveBackCollapseFraction = MutableStateFlow(0f)
     val predictiveBackCollapseFraction: StateFlow<Float> = _predictiveBackCollapseFraction.asStateFlow()
+
+    // Download state management
+    private val _downloadStates = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
+    val downloadStates: StateFlow<Map<String, DownloadState>> = _downloadStates.asStateFlow()
+
+    // Downloaded songs for library
+    private val _downloadedSongs = MutableStateFlow<ImmutableList<Song>>(persistentListOf())
+    val downloadedSongs: StateFlow<ImmutableList<Song>> = _downloadedSongs.asStateFlow()
 
     val playerContentExpansionFraction = Animatable(0f)
 
@@ -616,13 +632,13 @@ class PlayerViewModel @Inject constructor(
                 try {
                     Json.decodeFromString<List<String>>(orderJson)
                 } catch (e: Exception) {
-                    listOf("SONGS", "ALBUMS", "ARTIST", "PLAYLISTS", "FOLDERS", "LIKED")
+                    listOf("SONGS", "ALBUMS", "ARTIST", "PLAYLISTS", "FOLDERS", "LIKED", "DOWNLOADS")
                 }
             } else {
-                listOf("SONGS", "ALBUMS", "ARTIST", "PLAYLISTS", "FOLDERS", "LIKED")
+                listOf("SONGS", "ALBUMS", "ARTIST", "PLAYLISTS", "FOLDERS", "LIKED", "DOWNLOADS")
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("SONGS", "ALBUMS", "ARTIST", "PLAYLISTS", "FOLDERS", "LIKED"))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("SONGS", "ALBUMS", "ARTIST", "PLAYLISTS", "FOLDERS", "LIKED", "DOWNLOADS"))
 
     private val _loadedTabs = MutableStateFlow(emptySet<String>())
     private var lastBlockedDirectories: Set<String>? = null
@@ -643,6 +659,7 @@ class PlayerViewModel @Inject constructor(
                 LibraryTabId.PLAYLISTS -> SortOption.PLAYLISTS
                 LibraryTabId.FOLDERS -> SortOption.FOLDERS
                 LibraryTabId.LIKED -> SortOption.LIKED
+                LibraryTabId.DOWNLOADS -> SortOption.SONGS
             }
             Trace.endSection()
             options
@@ -3538,8 +3555,28 @@ class PlayerViewModel @Inject constructor(
             Log.d("PlayerViewModel", "YouTube song: ${song.title}, Stream URL: $url")
             url
         } else {
-            Log.d("PlayerViewModel", "Local song: ${song.title}, Content URI: ${song.contentUriString}")
-            song.contentUriString
+            // For local songs, check if it's a downloaded file or regular local file
+            val uri = if (song.contentUriString.isEmpty() && song.path.isNotEmpty()) {
+                // Downloaded song - use file path with proper file:// scheme
+                val filePath = song.path
+                Log.d("PlayerViewModel", "Downloaded song: ${song.title}, File path: $filePath")
+                if (!filePath.startsWith("file://")) {
+                    "file://$filePath"
+                } else {
+                    filePath
+                }
+            } else {
+                // Regular local file - use content URI
+                Log.d("PlayerViewModel", "Local song: ${song.title}, Content URI: ${song.contentUriString}")
+                song.contentUriString
+            }
+            
+            if (uri.isEmpty()) {
+                Log.e("PlayerViewModel", "No valid URI found for local song: ${song.title}")
+                return null
+            }
+            
+            uri
         }
         
         val mediaItem = MediaItem.Builder()
@@ -3549,6 +3586,11 @@ class PlayerViewModel @Inject constructor(
             .build()
             
         Log.d("PlayerViewModel", "Built MediaItem - Song: ${song.title}, Final URI: ${mediaItem.localConfiguration?.uri}")
+        Log.d("PlayerViewModel", "DEBUG - Song ID: ${song.id}, Title: ${song.title}")
+        Log.d("PlayerViewModel", "DEBUG - Song path: '${song.path}'")
+        Log.d("PlayerViewModel", "DEBUG - Song contentUriString: '${song.contentUriString}'")
+        Log.d("PlayerViewModel", "DEBUG - Stream URL: '$streamUrl'")
+        Log.d("PlayerViewModel", "DEBUG - Is YouTube: ${YouTubeToSongMapper.isYouTubeSong(song)}")
         return mediaItem
     }
 
@@ -4055,12 +4097,6 @@ class PlayerViewModel @Inject constructor(
             appShortcutManager.updateLastPlaylistShortcut(playlistId, queueName)
         }
         
-        // Set loading state if any songs are YouTube songs
-        val hasYouTubeSongs = songsToPlay.any { YouTubeToSongMapper.isYouTubeSong(it) }
-        if (hasYouTubeSongs) {
-            _isLoading.value = true
-        }
-        
         val castSession = _castSession.value
         if (castSession != null && castSession.remoteMediaClient != null) {
             if (!ensureHttpServerRunning()) return
@@ -4089,8 +4125,6 @@ class PlayerViewModel @Inject constructor(
                     if (!success) {
                         sendToast("Failed to load media on cast device.")
                     }
-                    // Clear loading state after cast completes
-                    _isLoading.value = false
                 }
             )
 
@@ -4103,76 +4137,102 @@ class PlayerViewModel @Inject constructor(
                 )
             }
         } else {
+            // Show player IMMEDIATELY with loading state
+            _playerUiState.update { 
+                it.copy(
+                    currentPlaybackQueue = songsToPlay.toImmutableList(), 
+                    currentQueueSourceName = queueName,
+                    preparingSongId = if (YouTubeToSongMapper.isYouTubeSong(startSong)) startSong.id else null
+                ) 
+            }
+            _stablePlayerState.update {
+                it.copy(
+                    currentSong = startSong,
+                    isPlaying = false, // Will start playing when stream URL is ready
+                    totalDuration = startSong.duration.coerceAtLeast(0L)
+                )
+            }
+            
+            // Show player sheet immediately
+            _isSheetVisible.value = true
+            
             val playSongsAction = {
                 viewModelScope.launch {
                     // Use Direct Engine Access to avoid TransactionTooLargeException on Binder
                     val enginePlayer = dualPlayerEngine.masterPlayer
                     
-                    // Set loading state
-                    _playerUiState.update { it.copy(isLoadingInitialSongs = true) }
+                    // Set loading state for the current song if it's YouTube
+                    val currentSongId = startSong.id
+                    val isCurrentYouTube = YouTubeToSongMapper.isYouTubeSong(startSong)
                     
-                    // Fetch stream URLs for YouTube videos asynchronously
-                    val mediaItems = withContext(Dispatchers.IO) {
-                        songsToPlay.map { song ->
-                            val streamUrl = if (YouTubeToSongMapper.isYouTubeSong(song)) {
-                                val url = fetchYouTubeStreamUrl(song)
-                                if (url == null) {
-                                    Log.e("PlayerViewModel", "Failed to fetch YouTube stream URL for song: ${song.title}")
-                                    sendToast("Failed to load ${song.title}. Check your connection.")
-                                    return@withContext emptyList<MediaItem>()
-                                }
-                                url
-                            } else {
-                                song.contentUriString
-                            }
-                           
-                            val metadataBuilder = MediaMetadata.Builder()
-                                .setTitle(song.title)
-                                .setArtist(song.displayArtist)
-                            playlistId?.let {
-                                val extras = Bundle()
-                                extras.putString("playlistId", it)
-                                metadataBuilder.setExtras(extras)
-                            }
-                            song.albumArtUriString?.toUri()?.let { uri ->
-                                metadataBuilder.setArtworkUri(uri)
-                            }
-                            val metadata = metadataBuilder.build()
-                            val mediaItem = MediaItem.Builder()
-                                .setMediaId(song.id)
-                                .setUri(streamUrl.toUri())
-                                .setMediaMetadata(metadata)
-                                .build()
-                           
-                            Log.d("PlayerViewModel", "internalPlaySongs - Song: ${song.title}, ID: ${song.id}, IsYouTube: ${YouTubeToSongMapper.isYouTubeSong(song)}, Stream URL: $streamUrl, MediaItem URI: ${mediaItem.localConfiguration?.uri}")
-                            mediaItem
-                        }
+                    if (isCurrentYouTube) {
+                        _playerUiState.update { it.copy(preparingSongId = currentSongId) }
                     }
-                    val startIndex = songsToPlay.indexOf(startSong).coerceAtLeast(0)
-
-                    if (mediaItems.isNotEmpty()) {
-                        // Direct access: No IPC limit involved
-                        enginePlayer.setMediaItems(mediaItems, startIndex, 0L)
-                        enginePlayer.prepare()
-                        enginePlayer.play()
-                        
-                        _playerUiState.update { it.copy(currentPlaybackQueue = songsToPlay.toImmutableList(), currentQueueSourceName = queueName) }
-                        _stablePlayerState.update {
-                            it.copy(
-                                currentSong = startSong,
-                                isPlaying = true,
-                                totalDuration = startSong.duration.coerceAtLeast(0L)
-                            )
+                    
+                    // Fetch stream URL for current song FIRST (highest priority)
+                    val currentStreamUrl = if (isCurrentYouTube) {
+                        withContext(Dispatchers.IO) {
+                            fetchYouTubeStreamUrl(startSong)
                         }
                     } else {
-                        // All songs failed to load
-                        Log.e("PlayerViewModel", "All songs failed to load. Queue may be empty.")
-                        sendToast("Failed to load songs. Please check your connection and try again.")
+                        startSong.contentUriString
                     }
-                    _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
                     
-                    // Clear loading state after playback starts
-                    _isLoading.value = false
+                    if (isCurrentYouTube && currentStreamUrl == null) {
+                        Log.e("PlayerViewModel", "Failed to fetch YouTube stream URL for song: ${startSong.title}")
+                        _playerUiState.update { it.copy(preparingSongId = null) }
+                        sendToast("Failed to load ${startSong.title}. Check your connection.")
+                        return@launch
+                    }
+                    
+                    // Create MediaItem for current song and start playback immediately
+                    val currentMediaItem = MediaItem.Builder()
+                        .setMediaId(startSong.id)
+                        .setUri(currentStreamUrl?.toUri() ?: startSong.contentUriString.toUri())
+                        .setMediaMetadata(buildMediaMetadataForSong(startSong))
+                        .build()
+                    
+                    // Start playback of current song immediately
+                    enginePlayer.setMediaItem(currentMediaItem)
+                    enginePlayer.prepare()
+                    enginePlayer.play()
+                    
+                    // Update state to show current song is playing
+                    _stablePlayerState.update {
+                        it.copy(
+                            currentSong = startSong,
+                            isPlaying = true,
+                            totalDuration = startSong.duration.coerceAtLeast(0L)
+                        )
+                    }
+                    _playerUiState.update { it.copy(preparingSongId = null) }
+                    
+                    Log.d("PlayerViewModel", "Started playback immediately: ${startSong.title}")
+                    
+                    // Fetch remaining stream URLs in background (lower priority)
+                    launch(Dispatchers.IO) {
+                        val remainingSongs = songsToPlay.filter { it.id != currentSongId }
+                        val remainingMediaItems = remainingSongs.mapNotNull { song ->
+                            if (YouTubeToSongMapper.isYouTubeSong(song)) {
+                                val url = fetchYouTubeStreamUrl(song)
+                                if (url == null) {
+                                    Log.w("PlayerViewModel", "Failed to fetch stream URL for: ${song.title}")
+                                    return@mapNotNull null
+                                }
+                                createYouTubeMediaItem(song, url)
+                            } else {
+                                buildMediaItemFromSong(song)
+                            }
+                        }
+                        
+                        // Add remaining items to player queue in background
+                        if (remainingMediaItems.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                enginePlayer.addMediaItems(remainingMediaItems)
+                                Log.d("PlayerViewModel", "Added ${remainingMediaItems.size} remaining songs to queue")
+                            }
+                        }
+                    }
                 }
                 Unit
             }
@@ -5943,6 +6003,10 @@ class PlayerViewModel @Inject constructor(
                     LibraryTabId.ALBUMS -> loadAlbumsIfNeeded()
                     LibraryTabId.ARTISTS -> loadArtistsIfNeeded()
                     LibraryTabId.FOLDERS -> loadFoldersFromRepository()
+                    LibraryTabId.DOWNLOADS -> {
+                        Timber.d("Downloads tab selected - calling loadDownloadedSongs()")
+                        loadDownloadedSongs()
+                    }
                     else -> Unit
                 }
                 _loadedTabs.update { currentTabs -> currentTabs + tabIdentifier }
@@ -6279,6 +6343,164 @@ class PlayerViewModel @Inject constructor(
      */
     fun resetLyricsSearchState() {
         _lyricsSearchUiState.value = LyricsSearchUiState.Idle
+    }
+
+    // ==================== DOWNLOAD FUNCTIONS ====================
+
+    /**
+     * Download YouTube song
+     */
+    fun downloadYouTubeSong(song: Song) {
+        if (!YouTubeToSongMapper.isYouTubeSong(song)) {
+            sendToast("Only YouTube songs can be downloaded")
+            return
+        }
+
+        if (youTubeDownloadService.isSongDownloaded(song)) {
+            sendToast("Song already downloaded")
+            return
+        }
+
+        viewModelScope.launch {
+            // Set initial download state
+            val initialState = DownloadState(song.id, isDownloading = true, progress = 0f)
+            _downloadStates.value = _downloadStates.value + (song.id to initialState)
+
+            try {
+                youTubeDownloadService.downloadYouTubeAudio(song).collect { downloadState ->
+                    _downloadStates.value = _downloadStates.value + (song.id to downloadState)
+
+                    // If download is complete, add to library
+                    if (downloadState.isComplete) {
+                        addDownloadedSongToLibrary(song)
+                        sendToast("Download completed: ${song.title}")
+                    } else if (downloadState.error != null) {
+                        sendToast("Download failed: ${downloadState.error}")
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Download failed for song: ${song.title}")
+                val errorState = DownloadState(
+                    songId = song.id,
+                    isDownloading = false,
+                    progress = 0f,
+                    isComplete = false,
+                    error = e.message
+                )
+                _downloadStates.value = _downloadStates.value + (song.id to errorState)
+                sendToast("Download failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Get download state for a specific song
+     */
+    fun getDownloadState(songId: String): DownloadState {
+        return _downloadStates.value[songId] ?: DownloadState(songId)
+    }
+
+    /**
+     * Check if a song is downloaded
+     */
+    fun isSongDownloaded(song: Song): Boolean {
+        return youTubeDownloadService.isSongDownloaded(song)
+    }
+
+    /**
+     * Add downloaded song to library
+     */
+    private suspend fun addDownloadedSongToLibrary(originalSong: Song) {
+        val downloadedFile = youTubeDownloadService.getDownloadedFile(originalSong)
+        if (downloadedFile != null) {
+            try {
+                // Get the actual MIME type of the downloaded file
+                val actualMimeType = youTubeDownloadService.getDownloadedFileMimeType(originalSong)
+                
+                // Create a new song entry with local file path and correct MIME type
+                val localSong = originalSong.copy(
+                    path = downloadedFile.absolutePath,
+                    mimeType = actualMimeType
+                )
+
+                // Convert to SongEntity for downloaded songs
+                val songEntity = SongEntity(
+                    id = System.currentTimeMillis(), // Use timestamp as unique ID for downloaded songs
+                    title = localSong.title,
+                    artistName = localSong.artist,
+                    artistId = localSong.artistId,
+                    albumArtist = localSong.albumArtist,
+                    albumName = localSong.album,
+                    albumId = localSong.albumId,
+                    contentUriString = "", // No content URI for local files
+                    albumArtUriString = localSong.albumArtUriString,
+                    duration = localSong.duration,
+                    genre = localSong.genre,
+                    filePath = downloadedFile.absolutePath,
+                    parentDirectoryPath = downloadedFile.parent ?: "",
+                    isFavorite = localSong.isFavorite,
+                    lyrics = localSong.lyrics,
+                    trackNumber = localSong.trackNumber,
+                    year = localSong.year,
+                    dateAdded = System.currentTimeMillis(),
+                    mimeType = actualMimeType, // Use the detected MIME type
+                    bitrate = localSong.bitrate,
+                    sampleRate = localSong.sampleRate
+                )
+                
+                // Insert into database
+                musicDao.insertSongs(listOf(songEntity))
+                
+                // Reset and load initial data to refresh library
+                resetAndLoadInitialData("Downloaded song added to library")
+                
+                // Also refresh downloaded songs list if we're on the downloads tab
+                if (_currentLibraryTabId.value == LibraryTabId.DOWNLOADS) {
+                    loadDownloadedSongs()
+                }
+                sendToast("Song added to library: ${originalSong.title}")
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to add downloaded song to library")
+                sendToast("Failed to add song to library")
+            }
+        }
+    }
+
+    /**
+     * Get all downloaded songs
+     */
+    fun getDownloadedSongs(): List<File> {
+        return youTubeDownloadService.getDownloadedSongs()
+    }
+
+    /**
+     * Load downloaded songs from the download directory
+     */
+    private suspend fun loadDownloadedSongs() {
+        withContext(Dispatchers.IO) {
+            try {
+                Timber.d("Starting to load downloaded songs from database...")
+                
+                // Load downloaded songs from database where duration is properly stored
+                val downloadedSongsFromDb = musicDao.getAllSongsList()
+                    .filter { it.filePath.contains("downloads") && it.contentUriString.isEmpty() }
+                
+                Timber.d("Found ${downloadedSongsFromDb.size} downloaded songs in database")
+                
+                val songs = downloadedSongsFromDb.map { songEntity ->
+                    songEntity.toSong() // Use the built-in conversion function
+                }
+                
+                _downloadedSongs.value = songs.toImmutableList()
+                Timber.d("Loaded ${songs.size} downloaded songs from database")
+                songs.forEach { song ->
+                    Timber.d("DEBUG Downloaded Song - ID: ${song.id}, Title: ${song.title}, Path: '${song.path}', Duration: ${song.duration}ms, ContentURI: '${song.contentUriString}'")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error loading downloaded songs from database")
+                _downloadedSongs.value = persistentListOf()
+            }
+        }
     }
 
     private fun onBlockedDirectoriesChanged() {

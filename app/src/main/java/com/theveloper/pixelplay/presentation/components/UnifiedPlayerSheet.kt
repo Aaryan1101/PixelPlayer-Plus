@@ -111,6 +111,8 @@ import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.NavBarStyle
 import com.theveloper.pixelplay.presentation.components.player.FullPlayerContent
+import com.theveloper.pixelplay.presentation.components.DownloadButton
+import com.theveloper.pixelplay.presentation.components.SmallDownloadButton
 import com.theveloper.pixelplay.presentation.components.scoped.rememberExpansionTransition
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
@@ -1183,6 +1185,7 @@ fun UnifiedPlayerSheet(
                                                 )
                                             }
                                         }
+                                        val downloadStates by playerViewModel.downloadStates.collectAsState()
                                         Box(
                                             modifier = Modifier
                                                 .graphicsLayer {
@@ -1228,6 +1231,13 @@ fun UnifiedPlayerSheet(
                                                 onShuffleToggle = playerViewModel::toggleShuffle,
                                                 onRepeatToggle = playerViewModel::cycleRepeatMode,
                                                 onFavoriteToggle = playerViewModel::toggleFavorite,
+                                                onDownloadClick = { 
+                                                    playerViewModel.downloadYouTubeSong(currentSongNonNull)
+                                                },
+                                                isDownloading = downloadStates[currentSongNonNull.id]?.isDownloading ?: false,
+                                                downloadProgress = downloadStates[currentSongNonNull.id]?.progress ?: 0f,
+                                                isDownloadComplete = playerViewModel.isSongDownloaded(currentSongNonNull),
+                                                hasDownloadError = downloadStates[currentSongNonNull.id]?.error != null
                                             )
                                         }
                                     }
@@ -1242,6 +1252,7 @@ fun UnifiedPlayerSheet(
                             LocalMaterialTheme provides (albumColorScheme
                                 ?: MaterialTheme.colorScheme)
                         ) {
+                            val downloadStates by playerViewModel.downloadStates.collectAsState()
                             Box(
                                 modifier = Modifier
                                     .height(containerHeight)
@@ -1272,18 +1283,22 @@ fun UnifiedPlayerSheet(
                                             velocity
                                         )
                                     },
-//                                queueSheetState = queueSheetState,
-//                                isQueueSheetVisible = false,
                                     onPlayPause = playerViewModel::playPause,
                                     onSeek = playerViewModel::seekTo,
                                     onNext = playerViewModel::nextSong,
                                     onPrevious = playerViewModel::previousSong,
                                     onCollapse = {},
-//                                onQueueSheetVisibilityChange = {},
                                     onShowCastClicked = {},
                                     onShuffleToggle = playerViewModel::toggleShuffle,
                                     onRepeatToggle = playerViewModel::cycleRepeatMode,
                                     onFavoriteToggle = playerViewModel::toggleFavorite,
+                                    onDownloadClick = { 
+                                        playerViewModel.downloadYouTubeSong(stablePlayerState.currentSong!!)
+                                    },
+                                    isDownloading = downloadStates[stablePlayerState.currentSong!!.id]?.isDownloading ?: false,
+                                    downloadProgress = downloadStates[stablePlayerState.currentSong!!.id]?.progress ?: 0f,
+                                    isDownloadComplete = playerViewModel.isSongDownloaded(stablePlayerState.currentSong!!),
+                                    hasDownloadError = downloadStates[stablePlayerState.currentSong!!.id]?.error != null
                                 )
                             }
                         }
@@ -1407,6 +1422,7 @@ fun UnifiedPlayerSheet(
                                 }.collectAsState(initial = staticSong)
 
                                 val liveSong = liveSongState ?: staticSong
+                                val downloadStates by playerViewModel.downloadStates.collectAsState()
 
                                 SongInfoBottomSheet(
                                     song = liveSong,
@@ -1477,12 +1493,19 @@ fun UnifiedPlayerSheet(
                                     },
                                     generateAiMetadata = { fields -> playerViewModel.generateAiMetadata(liveSong, fields) },
                                     removeFromListTrigger = {
-                                         // This is usually used to remove from a specific list (like 'Favorites').
+                                         // This is usually used to remove from a specific list (like 'Favorites'). 
                                          // In Queue, we have specific 'Remove' button. 
                                          // But maybe the user wants to remove from queue via this menu?
                                          playerViewModel.removeSongFromQueue(liveSong.id)
                                          selectedSongForInfo = null
-                                    }
+                                    },
+                                    onDownloadSong = { 
+                                        playerViewModel.downloadYouTubeSong(liveSong)
+                                    },
+                                    isDownloading = downloadStates[liveSong.id]?.isDownloading ?: false,
+                                    downloadProgress = downloadStates[liveSong.id]?.progress ?: 0f,
+                                    isDownloadComplete = playerViewModel.isSongDownloaded(liveSong),
+                                    hasDownloadError = downloadStates[liveSong.id]?.error != null
                                 )
                             }
                         }

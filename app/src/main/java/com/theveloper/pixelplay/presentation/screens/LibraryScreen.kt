@@ -502,6 +502,7 @@ fun LibraryScreen(
                             LibraryTabId.PLAYLISTS -> playlistUiState.currentPlaylistSortOption
                             LibraryTabId.LIKED -> playerUiState.currentFavoriteSortOption
                             LibraryTabId.FOLDERS -> playerUiState.currentFolderSortOption
+                            LibraryTabId.DOWNLOADS -> playerUiState.currentSongSortOption
                         }
 
                         val onSortOptionChanged: (SortOption) -> Unit = remember(playerViewModel, playlistViewModel, currentTabId) {
@@ -513,6 +514,7 @@ fun LibraryScreen(
                                     LibraryTabId.PLAYLISTS -> playlistViewModel.sortPlaylists(option)
                                     LibraryTabId.LIKED -> playerViewModel.sortFavoriteSongs(option)
                                     LibraryTabId.FOLDERS -> playerViewModel.sortFolders(option)
+                                    LibraryTabId.DOWNLOADS -> playerViewModel.sortSongs(option)
                                 }
                             }
                         }
@@ -603,6 +605,18 @@ fun LibraryScreen(
                                     LibrarySongsTab(
                                         songs = songs,
                                         isLoadingInitial = isLoading,
+                                        playerViewModel = playerViewModel,
+                                        bottomBarHeight = bottomBarHeightDp,
+                                        onMoreOptionsClick = stableOnMoreOptionsClick,
+                                        isRefreshing = isRefreshing,
+                                        onRefresh = onRefresh
+                                    )
+                                }
+                                LibraryTabId.DOWNLOADS -> {
+                                    val downloadedSongs by playerViewModel.downloadedSongs.collectAsState()
+                                    LibrarySongsTab(
+                                        songs = downloadedSongs,
+                                        isLoadingInitial = false, // Downloaded songs load instantly
                                         playerViewModel = playerViewModel,
                                         bottomBarHeight = bottomBarHeightDp,
                                         onMoreOptionsClick = stableOnMoreOptionsClick,
@@ -929,7 +943,14 @@ fun LibraryScreen(
                 generateAiMetadata = { fields ->
                     playerViewModel.generateAiMetadata(currentSong, fields)
                 },
-                removeFromListTrigger = {}
+                removeFromListTrigger = {},
+                onDownloadSong = { 
+                    playerViewModel.downloadYouTubeSong(currentSong)
+                },
+                isDownloading = playerViewModel.getDownloadState(currentSong.id).isDownloading,
+                downloadProgress = playerViewModel.getDownloadState(currentSong.id).progress,
+                isDownloadComplete = playerViewModel.isSongDownloaded(currentSong),
+                hasDownloadError = playerViewModel.getDownloadState(currentSong.id).error != null
             )
 
             if (showPlaylistBottomSheet) {
@@ -1316,6 +1337,7 @@ private fun LibraryTabId.iconRes(): Int = when (this) {
     LibraryTabId.PLAYLISTS -> R.drawable.rounded_playlist_play_24
     LibraryTabId.FOLDERS -> R.drawable.rounded_folder_24
     LibraryTabId.LIKED -> R.drawable.rounded_favorite_24
+    LibraryTabId.DOWNLOADS -> R.drawable.outline_save_24
 }
 
 private fun LibraryTabId.displayTitle(): String =

@@ -84,7 +84,12 @@ fun SongInfoBottomSheet(
     onNavigateToArtist: () -> Unit,
     onEditSong: (title: String, artist: String, album: String, genre: String, lyrics: String, trackNumber: Int, coverArtUpdate: CoverArtUpdate?) -> Unit,
     generateAiMetadata: suspend (List<String>) -> Result<SongMetadata>,
-    removeFromListTrigger: () -> Unit
+    removeFromListTrigger: () -> Unit,
+    onDownloadSong: () -> Unit,
+    isDownloading: Boolean = false,
+    downloadProgress: Float = 0f,
+    isDownloadComplete: Boolean = false,
+    hasDownloadError: Boolean = false
 ) {
     val context = LocalContext.current
     var showEditSheet by remember { mutableStateOf(false) }
@@ -245,7 +250,7 @@ fun SongInfoBottomSheet(
                     // Botón de Compartir Modificado con altura
                     FilledTonalIconButton(
                         modifier = Modifier
-                            .weight(0.25f)
+                            .weight(0.2f)
                             .fillMaxHeight(), // Rellena a la altura de la Row
                         onClick = {
                             try {
@@ -269,6 +274,16 @@ fun SongInfoBottomSheet(
                             contentDescription = "Share song file"
                         )
                     }
+
+                    // Download Button
+                    SmallDownloadButton(
+                        isDownloading = isDownloading,
+                        progress = downloadProgress,
+                        isComplete = isDownloadComplete,
+                        hasError = hasDownloadError,
+                        onDownloadClick = onDownloadSong,
+                        modifier = Modifier.weight(0.2f)
+                    )
                 }
 
             Spacer(modifier = Modifier.height(10.dp))
