@@ -41,6 +41,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +58,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.model.DownloadState
+import com.theveloper.pixelplay.data.model.EnhancedDownloadState
+import com.theveloper.pixelplay.presentation.components.DownloadProgressBar
 import com.theveloper.pixelplay.presentation.components.subcomps.AutoSizingTextToFill
 import com.theveloper.pixelplay.utils.formatDuration
 import com.theveloper.pixelplay.utils.shapes.RoundedStarShape
@@ -89,7 +94,11 @@ fun SongInfoBottomSheet(
     isDownloading: Boolean = false,
     downloadProgress: Float = 0f,
     isDownloadComplete: Boolean = false,
-    hasDownloadError: Boolean = false
+    hasDownloadError: Boolean = false,
+    // Enhanced download parameters
+    downloadSpeed: Long = 0L,
+    timeRemaining: Long = 0L,
+    retryCount: Int = 0
 ) {
     val context = LocalContext.current
     var showEditSheet by remember { mutableStateOf(false) }
@@ -276,13 +285,17 @@ fun SongInfoBottomSheet(
                     }
 
                     // Download Button
-                    SmallDownloadButton(
+                    DownloadProgressBar(
                         isDownloading = isDownloading,
                         progress = downloadProgress,
                         isComplete = isDownloadComplete,
                         hasError = hasDownloadError,
+                        downloadSpeed = downloadSpeed,
+                        timeRemaining = timeRemaining,
+                        retryCount = retryCount,
                         onDownloadClick = onDownloadSong,
-                        modifier = Modifier.weight(0.2f)
+                        modifier = Modifier.weight(0.2f),
+                        showDetails = true
                     )
                 }
 

@@ -101,6 +101,7 @@ import androidx.media3.common.Player
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.presentation.components.DownloadButton
 import com.theveloper.pixelplay.presentation.components.SmallDownloadButton
+import com.theveloper.pixelplay.presentation.components.DownloadProgressBar
 import com.theveloper.pixelplay.data.model.Artist
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.CarouselStyle
@@ -168,7 +169,11 @@ fun FullPlayerContent(
     isDownloading: Boolean = false,
     downloadProgress: Float = 0f,
     isDownloadComplete: Boolean = false,
-    hasDownloadError: Boolean = false
+    hasDownloadError: Boolean = false,
+    // Enhanced download parameters
+    downloadSpeed: Long = 0L,
+    timeRemaining: Long = 0L,
+    retryCount: Int = 0
 ) {
     var retainedSong by remember { mutableStateOf(currentSong) }
     LaunchedEffect(currentSong?.id) {
@@ -394,7 +399,10 @@ fun FullPlayerContent(
                     isDownloading = isDownloading,
                     downloadProgress = downloadProgress,
                     isDownloadComplete = isDownloadComplete,
-                    hasDownloadError = hasDownloadError
+                    hasDownloadError = hasDownloadError,
+                    downloadSpeed = downloadSpeed,
+                    timeRemaining = timeRemaining,
+                    retryCount = retryCount
                 )
             }
         }
@@ -1447,7 +1455,10 @@ private fun BottomToggleRow(
     isDownloading: Boolean = false,
     downloadProgress: Float = 0f,
     isDownloadComplete: Boolean = false,
-    hasDownloadError: Boolean = false
+    hasDownloadError: Boolean = false,
+    downloadSpeed: Long = 0L,
+    timeRemaining: Long = 0L,
+    retryCount: Int = 0
 ) {
     val isFavorite = isFavoriteProvider()
     val rowCorners = 60.dp
@@ -1535,13 +1546,17 @@ private fun BottomToggleRow(
                 modifier = commonModifier,
                 contentAlignment = Alignment.Center
             ) {
-                SmallDownloadButton(
+                DownloadProgressBar(
                     isDownloading = isDownloading,
                     progress = downloadProgress,
                     isComplete = isDownloadComplete,
                     hasError = hasDownloadError,
+                    downloadSpeed = downloadSpeed,
+                    timeRemaining = timeRemaining,
+                    retryCount = retryCount,
                     onDownloadClick = onDownloadClick,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    showDetails = false
                 )
             }
         }
