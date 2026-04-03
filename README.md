@@ -17,11 +17,11 @@
 </p>
 
 <p align="center">
-    <a href="https://github.com/YOUR_USERNAME/PixelPlayer/releases/latest">
-        <img src="https://img.shields.io/github/v/release/YOUR_USERNAME/PixelPlayer?include_prereleases&logo=github&style=for-the-badge&label=Latest%20Release" alt="Latest Release">
+    <a href="https://github.com/Aaryan1101/PixelPlayer-Plus/releases/latest">
+        <img src="https://img.shields.io/github/v/release/Aaryan1101/PixelPlayer-Plus?include_prereleases&logo=github&style=for-the-badge&label=Latest%20Release" alt="Latest Release">
     </a>
-    <a href="https://github.com/YOUR_USERNAME/PixelPlayer/releases">
-        <img src="https://img.shields.io/github/downloads/YOUR_USERNAME/PixelPlayer/total?logo=github&style=for-the-badge" alt="Total Downloads">
+    <a href="https://github.com/Aaryan1101/PixelPlayer-Plus/releases">
+        <img src="https://img.shields.io/github/downloads/Aaryan1101/PixelPlayer-Plus/total?logo=github&style=for-the-badge" alt="Total Downloads">
     </a>
     <img src="https://img.shields.io/badge/Android-10%2B-green?style=for-the-badge&logo=android" alt="Android 10+">
     <img src="https://img.shields.io/badge/Kotlin-100%25-purple?style=for-the-badge&logo=kotlin" alt="Kotlin">
@@ -31,7 +31,7 @@
 
 ## 🌟 What's New in This Enhanced Version
 
-This is an enhanced fork of the original PixelPlayer with powerful online music streaming capabilities:
+This is an enhanced fork of the original PixelPlayer by [theovilardo](https://github.com/theovilardo), now maintained by [Aaryan](https://github.com/Aaryan1101) with powerful online music streaming capabilities and performance improvements:
 
 ### 🌐 **Online Music Integration**
 - **YouTube Search & Stream** - Search and play millions of songs via NewPipe extractor
@@ -45,11 +45,18 @@ This is an enhanced fork of the original PixelPlayer with powerful online music 
 - **Smooth UI** - Eliminated frame drops during startup
 - **Background Processing** - Non-blocking operations for better UX
 
+### 🚀 **Recent Enhancements**
+- **YouTube Stream Caching** - 25-minute TTL cache for faster YouTube streaming
+- **Enhanced Search** - Debounced search with loading states and job management
+- **Dynamic Color Theming** - Download components adapt to player theme colors
+- **Improved Download Management** - Better state handling and cleanup
+- **Code Quality Improvements** - Better error handling and resource management
+
 ---
 
 ## ‼️ DISCLAIMER
-- This is an enhanced fork of the original PixelPlayer by theovilardo
-- Support for this version is provided by the fork maintainer
+- This is an enhanced fork of the original PixelPlayer by [theovilardo](https://github.com/theovilardo)
+- **Maintained by [Aaryan](https://github.com/Aaryan1101)** - Support for this version is provided by the fork maintainer
 - Online features require internet connection and may have usage limitations
 
 ---
@@ -158,7 +165,7 @@ This is an enhanced fork of the original PixelPlayer with powerful online music 
 
 1. **Clone repository**
    ```sh
-   git clone https://github.com/Aaryan1101/PixelPlayer.git
+   git clone https://github.com/Aaryan1101/PixelPlayer-Plus.git
    ```
 
 2. **Open in Android Studio**
@@ -183,7 +190,7 @@ This is an enhanced fork of the original PixelPlayer with powerful online music 
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/Aaryan1101/PixelPlayer/releases/latest">
+  <a href="https://github.com/Aaryan1101/PixelPlayer-Plus/releases/latest">
     <img src="https://raw.githubusercontent.com/Kunzisoft/Github-badge/main/get-it-on-github.png" alt="Get it on GitHub" height="60">
   </a>
 </p>
