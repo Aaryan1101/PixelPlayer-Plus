@@ -25,7 +25,10 @@ fun DownloadButton(
     isComplete: Boolean,
     hasError: Boolean,
     onDownloadClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Dynamic colors to match player theme
+    primaryColor: Color = MaterialTheme.colorScheme.primary,
+    onSurfaceColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
@@ -58,7 +61,7 @@ fun DownloadButton(
                 Icon(
                     imageVector = Icons.Default.Check,
                     contentDescription = "Download Complete",
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = primaryColor,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -75,7 +78,7 @@ fun DownloadButton(
                     modifier = Modifier.size(24.dp),
                     strokeWidth = 2.5.dp,
                     strokeCap = StrokeCap.Round,
-                    color = MaterialTheme.colorScheme.primary
+                    color = primaryColor
                 )
             }
         }
@@ -89,7 +92,7 @@ fun DownloadButton(
                 Icon(
                     imageVector = Icons.Default.Download,
                     contentDescription = "Download Song",
-                    tint = MaterialTheme.colorScheme.onSurface,
+                    tint = onSurfaceColor,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -104,7 +107,10 @@ fun SmallDownloadButton(
     isComplete: Boolean,
     hasError: Boolean,
     onDownloadClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Dynamic colors to match player theme
+    primaryColor: Color = MaterialTheme.colorScheme.primary,
+    onSurfaceColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
@@ -135,7 +141,7 @@ fun SmallDownloadButton(
                 Icon(
                     imageVector = Icons.Default.Check,
                     contentDescription = "Download Complete",
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = primaryColor,
                     modifier = Modifier.size(18.dp)
                 )
             }
@@ -151,7 +157,7 @@ fun SmallDownloadButton(
                     modifier = Modifier.size(18.dp),
                     strokeWidth = 2.dp,
                     strokeCap = StrokeCap.Round,
-                    color = MaterialTheme.colorScheme.primary
+                    color = primaryColor
                 )
             }
         }
@@ -164,7 +170,7 @@ fun SmallDownloadButton(
                 Icon(
                     imageVector = Icons.Default.Download,
                     contentDescription = "Download Song",
-                    tint = MaterialTheme.colorScheme.onSurface,
+                    tint = onSurfaceColor,
                     modifier = Modifier.size(18.dp)
                 )
             }

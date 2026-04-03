@@ -191,6 +191,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.ArrayDeque
 import java.util.Calendar
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import kotlin.random.Random
@@ -211,6 +212,7 @@ private const val EXTERNAL_EXTRA_MIME_TYPE = EXTERNAL_EXTRA_PREFIX + "MIME_TYPE"
 private const val EXTERNAL_EXTRA_BITRATE = EXTERNAL_EXTRA_PREFIX + "BITRATE"
 private const val EXTERNAL_EXTRA_SAMPLE_RATE = EXTERNAL_EXTRA_PREFIX + "SAMPLE_RATE"
 private const val CAST_LOG_TAG = "PlayerCastTransfer"
+private const val YOUTUBE_STREAM_URL_CACHE_TTL_MS = 25 * 60 * 1000L
 
 enum class PlayerSheetState {
     COLLAPSED,
@@ -220,6 +222,11 @@ enum class PlayerSheetState {
 data class ColorSchemePair(
     val light: ColorScheme,
     val dark: ColorScheme
+)
+
+private data class CachedYouTubeStreamUrl(
+    val url: String,
+    val expiresAtMs: Long
 )
 
 data class StablePlayerState(
@@ -252,6 +259,8 @@ data class PlayerUiState(
     val selectedSearchFilter: SearchFilterType = SearchFilterType.ALL,
     val searchMode: SearchMode = SearchMode.LOCAL,
     val searchHistory: ImmutableList<SearchHistoryItem> = persistentListOf(),
+    val isSearchLoading: Boolean = false,
+    val activeSearchQuery: String = "",
     val isSyncingLibrary: Boolean = false,
     val musicFolders: ImmutableList<MusicFolder> = persistentListOf(),
     val currentFolderPath: String? = null,
@@ -358,6 +367,8 @@ class PlayerViewModel @Inject constructor(
     // Downloaded songs for library
     private val _downloadedSongs = MutableStateFlow<ImmutableList<Song>>(persistentListOf())
     val downloadedSongs: StateFlow<ImmutableList<Song>> = _downloadedSongs.asStateFlow()
+    private var searchJob: Job? = null
+    private val youTubeStreamUrlCache = ConcurrentHashMap<String, CachedYouTubeStreamUrl>()
 
     val playerContentExpansionFraction = Animatable(0f)
 
@@ -4612,13 +4623,20 @@ class PlayerViewModel @Inject constructor(
                 if (success) {
                     _toastEvents.emit("File deleted")
                     removeFromMediaControllerQueue(song.id)
+                    _downloadedSongs.update { downloadedSongs ->
+                        downloadedSongs
+                            .filterNot { it.path == song.path || it.id == song.id }
+                            .toImmutableList()
+                    }
                     removeSong(song)
                     onResult(true)
+                    return@launch
                 } else {
                     _toastEvents.emit("Can't delete the file")
                 }
-            } else
+            } else {
                 _toastEvents.emit("File does not exist or not permitted")
+            }
             onResult(false)
         }
     }
@@ -5328,6 +5346,10 @@ class PlayerViewModel @Inject constructor(
             Log.e("PlayerViewModel", "Failed to extract video ID from song ID: ${song.id}")
             return null
         }
+
+        getValidCachedYouTubeStreamUrl(videoId)?.let { cachedUrl ->
+            return cachedUrl
+        }
         
         Log.d("PlayerViewModel", "Fetching YouTube stream URL for song: ${song.title}, Video ID: $videoId")
         
@@ -5340,6 +5362,8 @@ class PlayerViewModel @Inject constructor(
             if (streamUrl == null) {
                 val error = result.exceptionOrNull()
                 Log.e("PlayerViewModel", "Failed to fetch YouTube stream URL for song: ${song.title}", error)
+            } else {
+                cacheYouTubeStreamUrl(videoId, streamUrl)
             }
             
             streamUrl
@@ -5349,23 +5373,58 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    private fun getValidCachedYouTubeStreamUrl(videoId: String): String? {
+        val cachedEntry = youTubeStreamUrlCache[videoId] ?: return null
+        return if (cachedEntry.expiresAtMs > System.currentTimeMillis()) {
+            cachedEntry.url
+        } else {
+            youTubeStreamUrlCache.remove(videoId)
+            null
+        }
+    }
+
+    private fun cacheYouTubeStreamUrl(videoId: String, url: String) {
+        youTubeStreamUrlCache[videoId] = CachedYouTubeStreamUrl(
+            url = url,
+            expiresAtMs = System.currentTimeMillis() + YOUTUBE_STREAM_URL_CACHE_TTL_MS
+        )
+    }
+
     fun updateSearchMode(mode: SearchMode) {
         _playerUiState.update { it.copy(searchMode = mode) }
     }
 
     fun performSearch(query: String) {
-        viewModelScope.launch {
+        searchJob?.cancel()
+        val normalizedQuery = query.trim()
+
+        if (normalizedQuery.isBlank()) {
+            _playerUiState.update {
+                it.copy(
+                    searchResults = persistentListOf(),
+                    isSearchLoading = false,
+                    activeSearchQuery = ""
+                )
+            }
+            return
+        }
+
+        searchJob = viewModelScope.launch {
             try {
-                if (query.isBlank()) {
-                    _playerUiState.update { it.copy(searchResults = persistentListOf()) }
-                    return@launch
+                _playerUiState.update {
+                    it.copy(
+                        isSearchLoading = true,
+                        activeSearchQuery = normalizedQuery
+                    )
                 }
+
+                delay(250)
 
                 val currentFilter = _playerUiState.value.selectedSearchFilter
 
                 val resultsList: List<SearchResultItem> = withContext(Dispatchers.IO) {
                     // Search local first (faster), then online if needed
-                    val localResults = musicRepository.searchAll(query, currentFilter).first()
+                    val localResults = musicRepository.searchAll(normalizedQuery, currentFilter).first()
                     
                     // Limit local results to prevent UI lag
                     val limitedLocalResults = localResults.take(20)
@@ -5373,7 +5432,7 @@ class PlayerViewModel @Inject constructor(
                     // Only search online if we need more results or for song-specific searches
                     val onlineResults = if (currentFilter in listOf(SearchFilterType.ALL, SearchFilterType.SONGS) && limitedLocalResults.size < 15) {
                         try {
-                            val videosResult = youTubeExtractorService.searchSongs(query)
+                            val videosResult = youTubeExtractorService.searchSongs(normalizedQuery)
                             if (videosResult.isSuccess) {
                                 val videos = videosResult.getOrThrow()
                                 val songs = YouTubeToSongMapper.mapToSongs(videos)
@@ -5393,7 +5452,7 @@ class PlayerViewModel @Inject constructor(
                                 emptyList()
                             }
                         } catch (e: Exception) {
-                            Log.e("PlayerViewModel", "Error searching YouTube for query: $query", e)
+                            Log.e("PlayerViewModel", "Error searching YouTube for query: $normalizedQuery", e)
                             emptyList()
                         }
                     } else {
@@ -5440,14 +5499,28 @@ class PlayerViewModel @Inject constructor(
                     combinedResults
                 }
 
-                _playerUiState.update { it.copy(searchResults = resultsList.toImmutableList()) }
-
-            } catch (e: Exception) {
-                Log.e("PlayerViewModel", "Error performing search for query: $query", e)
                 _playerUiState.update {
-                    it.copy(
-                        searchResults = persistentListOf(),
-                    )
+                    if (it.activeSearchQuery == normalizedQuery) {
+                        it.copy(
+                            searchResults = resultsList.toImmutableList(),
+                            isSearchLoading = false
+                        )
+                    } else {
+                        it
+                    }
+                }
+            } catch (_: CancellationException) {
+            } catch (e: Exception) {
+                Log.e("PlayerViewModel", "Error performing search for query: $normalizedQuery", e)
+                _playerUiState.update {
+                    if (it.activeSearchQuery == normalizedQuery) {
+                        it.copy(
+                            searchResults = persistentListOf(),
+                            isSearchLoading = false
+                        )
+                    } else {
+                        it
+                    }
                 }
             }
         }
@@ -6213,7 +6286,7 @@ class PlayerViewModel @Inject constructor(
     suspend fun generateAiMetadata(song: Song, fields: List<String>): Result<SongMetadata> {
         return aiMetadataGenerator.generate(song, fields)
     }
-the 
+
     private fun updateSongInStates(updatedSong: Song, newLyrics: Lyrics? = null) {
         // Update the queue first
         val currentQueue = _playerUiState.value.currentPlaybackQueue
@@ -6378,7 +6451,6 @@ the
                     // If download is complete, add to library
                     if (downloadState.isComplete) {
                         addDownloadedSongToLibrary(song)
-                        sendToast("Download completed: ${song.title}")
                     } else if (downloadState.error != null) {
                         sendToast("Download failed: ${downloadState.error}")
                     }
@@ -6463,10 +6535,8 @@ the
                 if (_currentLibraryTabId.value == LibraryTabId.DOWNLOADS) {
                     loadDownloadedSongs()
                 }
-                sendToast("Song added to library: ${originalSong.title}")
             } catch (e: Exception) {
                 Timber.e(e, "Failed to add downloaded song to library")
-                sendToast("Failed to add song to library")
             }
         }
     }
@@ -6589,7 +6659,6 @@ the
                     // If download is complete, add to library
                     if (enhancedState.isComplete) {
                         addDownloadedSongToLibraryEnhanced(song)
-                        sendToast("Download completed: ${song.title}")
                     } else if (enhancedState.error != null) {
                         sendToast("Download failed: ${enhancedState.error}")
                     }
@@ -6613,7 +6682,6 @@ the
 
                     if (enhancedState.isComplete) {
                         addDownloadedSongToLibraryEnhanced(song)
-                        sendToast("Download completed: ${song.title}")
                     } else if (enhancedState.error != null) {
                         sendToast("Download failed: ${enhancedState.error}")
                     }
@@ -6690,10 +6758,8 @@ the
                 if (_currentLibraryTabId.value == LibraryTabId.DOWNLOADS) {
                     loadDownloadedSongs()
                 }
-                sendToast("Song added to library: ${originalSong.title}")
             } catch (e: Exception) {
                 Timber.e(e, "Failed to add downloaded song to library")
-                sendToast("Failed to add song to library")
             }
         }
     }

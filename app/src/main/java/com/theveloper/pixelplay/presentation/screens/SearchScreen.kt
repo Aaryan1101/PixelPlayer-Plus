@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
@@ -128,6 +129,7 @@ fun SearchScreen(
     val currentFilter by remember { derivedStateOf { uiState.selectedSearchFilter } }
     val searchMode = uiState.searchMode
     val searchHistory = uiState.searchHistory
+    val isSearchLoading = uiState.isSearchLoading && uiState.activeSearchQuery == searchQuery.trim()
     // Keep genres collection as it's needed for GenreCategoriesGrid
     val genres by playerViewModel.genres.collectAsState()
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
@@ -319,6 +321,8 @@ fun SearchScreen(
                                     onHistoryDelete = rememberedOnHistoryDelete,
                                     onClearAllHistory = rememberedOnClearAllHistory
                                 )
+                            } else if (searchQuery.isNotBlank() && isSearchLoading) {
+                                SearchLoadingState()
                             } else if (searchQuery.isNotBlank() && searchResults.isEmpty()) {
                                 EmptySearchResults(
                                     searchQuery = searchQuery,
@@ -411,15 +415,19 @@ fun SearchScreen(
                             SearchFilterChip(SearchFilterType.PLAYLISTS, currentFilter, playerViewModel)
                         }
                         
-                        SearchResultsList(
-                            results = searchResults,
-                            playerViewModel = playerViewModel,
-                            onItemSelected = { },
-                            currentPlayingSongId = stablePlayerState.currentSong?.id,
-                            isPlaying = stablePlayerState.isPlaying,
-                            onSongMoreOptionsClick = handleSongMoreOptionsClick,
-                            navController = navController
-                        )
+                        if (isSearchLoading) {
+                            SearchLoadingState()
+                        } else {
+                            SearchResultsList(
+                                results = searchResults,
+                                playerViewModel = playerViewModel,
+                                onItemSelected = { },
+                                currentPlayingSongId = stablePlayerState.currentSong?.id,
+                                isPlaying = stablePlayerState.isPlaying,
+                                onSongMoreOptionsClick = handleSongMoreOptionsClick,
+                                navController = navController
+                            )
+                        }
                     }
                 }
             }
@@ -507,6 +515,28 @@ fun SearchScreen(
                     playerViewModel = playerViewModel,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun SearchLoadingState() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CircularProgressIndicator()
+            Text(
+                text = "Searching...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

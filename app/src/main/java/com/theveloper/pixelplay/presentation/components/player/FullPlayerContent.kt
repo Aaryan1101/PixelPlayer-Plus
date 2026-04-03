@@ -1556,7 +1556,13 @@ private fun BottomToggleRow(
                     retryCount = retryCount,
                     onDownloadClick = onDownloadClick,
                     modifier = Modifier.fillMaxWidth(),
-                    showDetails = false
+                    showDetails = false,
+                    primaryColor = LocalMaterialTheme.current.primary,
+                    onPrimaryColor = LocalMaterialTheme.current.onPrimary,
+                    primaryContainerColor = LocalMaterialTheme.current.primaryContainer,
+                    onPrimaryContainerColor = LocalMaterialTheme.current.onPrimaryContainer,
+                    surfaceColor = LocalMaterialTheme.current.surface,
+                    onSurfaceColor = LocalMaterialTheme.current.onSurface
                 )
             }
         }

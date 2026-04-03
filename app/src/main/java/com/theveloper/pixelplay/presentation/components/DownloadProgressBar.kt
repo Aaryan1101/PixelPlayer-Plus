@@ -34,7 +34,14 @@ fun DownloadProgressBar(
     retryCount: Int = 0,
     onDownloadClick: () -> Unit,
     modifier: Modifier = Modifier,
-    showDetails: Boolean = true
+    showDetails: Boolean = true,
+    // Dynamic colors to match player theme
+    primaryColor: Color = MaterialTheme.colorScheme.primary,
+    onPrimaryColor: Color = MaterialTheme.colorScheme.onPrimary,
+    primaryContainerColor: Color = MaterialTheme.colorScheme.primaryContainer,
+    onPrimaryContainerColor: Color = MaterialTheme.colorScheme.onPrimaryContainer,
+    surfaceColor: Color = MaterialTheme.colorScheme.surface,
+    onSurfaceColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
@@ -44,22 +51,22 @@ fun DownloadProgressBar(
 
     val backgroundColor = when {
         hasError -> MaterialTheme.colorScheme.errorContainer
-        isComplete -> MaterialTheme.colorScheme.primaryContainer
-        isDownloading -> MaterialTheme.colorScheme.surfaceVariant
-        else -> MaterialTheme.colorScheme.surface
+        isComplete -> primaryContainerColor
+        isDownloading -> surfaceColor
+        else -> surfaceColor
     }
 
     val progressColor = when {
         hasError -> MaterialTheme.colorScheme.error
-        isComplete -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.primary
+        isComplete -> primaryColor
+        else -> primaryColor
     }
 
     val contentColor = when {
         hasError -> MaterialTheme.colorScheme.onErrorContainer
-        isComplete -> MaterialTheme.colorScheme.onPrimaryContainer
-        isDownloading -> MaterialTheme.colorScheme.onSurfaceVariant
-        else -> MaterialTheme.colorScheme.onSurface
+        isComplete -> onPrimaryContainerColor
+        isDownloading -> onSurfaceColor
+        else -> onSurfaceColor
     }
 
     Box(
@@ -143,7 +150,7 @@ fun DownloadProgressBar(
                     
                     val iconTint = when {
                         hasError -> MaterialTheme.colorScheme.error
-                        isComplete -> MaterialTheme.colorScheme.primary
+                        isComplete -> primaryColor
                         else -> contentColor
                     }
 
@@ -179,7 +186,7 @@ fun DownloadProgressBar(
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = "Complete",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = primaryColor,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -195,7 +202,14 @@ fun CompactDownloadProgressBar(
     isComplete: Boolean,
     hasError: Boolean,
     onDownloadClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Dynamic colors to match player theme
+    primaryColor: Color = MaterialTheme.colorScheme.primary,
+    onPrimaryColor: Color = MaterialTheme.colorScheme.onPrimary,
+    primaryContainerColor: Color = MaterialTheme.colorScheme.primaryContainer,
+    onPrimaryContainerColor: Color = MaterialTheme.colorScheme.onPrimaryContainer,
+    surfaceColor: Color = MaterialTheme.colorScheme.surface,
+    onSurfaceColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     DownloadProgressBar(
         isDownloading = isDownloading,
@@ -204,7 +218,13 @@ fun CompactDownloadProgressBar(
         hasError = hasError,
         onDownloadClick = onDownloadClick,
         modifier = modifier,
-        showDetails = false
+        showDetails = false,
+        primaryColor = primaryColor,
+        onPrimaryColor = onPrimaryColor,
+        primaryContainerColor = primaryContainerColor,
+        onPrimaryContainerColor = onPrimaryContainerColor,
+        surfaceColor = surfaceColor,
+        onSurfaceColor = onSurfaceColor
     )
 }
 
