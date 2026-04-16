@@ -188,6 +188,7 @@ fun PlaylistBottomSheet(
                     .padding(bottom = 18.dp, end = 8.dp),
                 shape = CircleShape,
                 onClick = {
+                    playlistViewModel.saveRemoteSong(song)
                     playlistViewModel.addOrRemoveSongFromPlaylists(
                         song.id,
                         selectedPlaylists.filter { it.value }.keys.toList(),

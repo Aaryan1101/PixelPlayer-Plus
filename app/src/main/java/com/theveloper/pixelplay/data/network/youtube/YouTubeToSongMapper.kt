@@ -7,6 +7,60 @@ import org.schabi.newpipe.extractor.stream.StreamInfoItem
  * Mapper to convert NewPipe StreamInfoItem to Song objects
  */
 object YouTubeToSongMapper {
+    private val musicTitleSignals = listOf(
+        "song",
+        "official audio",
+        "official video",
+        "music video",
+        "lyric",
+        "lyrics",
+        "audio",
+        "remix",
+        "cover",
+        "acoustic",
+        "live performance",
+        "theme",
+        "ost",
+        "soundtrack",
+        "jukebox",
+        "album",
+        "single"
+    )
+
+    private val musicUploaderSignals = listOf(
+        "vevo",
+        "records",
+        "music",
+        "t-series",
+        "sony music",
+        "zee music",
+        "saregama",
+        "tips",
+        "label"
+    )
+
+    private val nonMusicSignals = listOf(
+        "trailer",
+        "teaser",
+        "episode",
+        "full movie",
+        "movie scene",
+        "scene",
+        "review",
+        "reaction",
+        "interview",
+        "news",
+        "podcast",
+        "vlog",
+        "comedy",
+        "stand up",
+        "gaming",
+        "gameplay",
+        "tutorial",
+        "explained",
+        "shorts",
+        "#shorts"
+    )
 
     /**
      * Convert a YouTube StreamInfoItem to a Song object
@@ -63,13 +117,45 @@ object YouTubeToSongMapper {
      * @return List of Song objects
      */
     fun mapToSongs(videoItems: List<StreamInfoItem>): List<Song> {
-        return videoItems.mapNotNull { item ->
+        return videoItems.filter(::isLikelyMusicContent).mapNotNull { item ->
             try {
                 mapToSong(item)
             } catch (e: Exception) {
                 null // Skip items that can't be mapped
             }
         }
+    }
+
+    fun isLikelyMusicContent(videoItem: StreamInfoItem): Boolean {
+        val title = videoItem.name.lowercase()
+        val uploader = (videoItem.uploaderName ?: "").lowercase()
+        val durationSeconds = videoItem.duration
+
+        if (videoItem.isShortFormContent || durationSeconds in 1 until 45) return false
+
+        val hasMusicSignal = musicTitleSignals.any { it in title } ||
+            musicUploaderSignals.any { it in uploader }
+        val hasNonMusicSignal = nonMusicSignals.any { it in title }
+
+        if (hasNonMusicSignal && !hasMusicSignal) return false
+        if (durationSeconds > 12 * 60 && !hasMusicSignal) return false
+
+        return hasMusicSignal || looksLikeArtistTitle(title) || durationSeconds in 45..(12 * 60)
+    }
+
+    fun musicSearchQuery(query: String): String {
+        val normalizedQuery = query.trim()
+        val lowerQuery = normalizedQuery.lowercase()
+        return if (musicTitleSignals.any { it in lowerQuery }) {
+            normalizedQuery
+        } else {
+            "$normalizedQuery song"
+        }
+    }
+
+    private fun looksLikeArtistTitle(title: String): Boolean {
+        val parts = title.split(" - ", limit = 2)
+        return parts.size == 2 && parts.all { it.trim().length >= 2 }
     }
 
     /**

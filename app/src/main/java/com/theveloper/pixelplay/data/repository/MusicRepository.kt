@@ -148,7 +148,11 @@ interface MusicRepository {
      */
     suspend fun searchRemoteLyrics(song: Song): Result<Pair<String, List<LyricsSearchResult>>>
 
+    suspend fun updateLyrics(song: Song, lyrics: String)
+
     suspend fun updateLyrics(songId: Long, lyrics: String)
+
+    suspend fun resetLyrics(song: Song)
 
     suspend fun resetLyrics(songId: Long)
 

@@ -13,6 +13,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.Player
 import com.theveloper.pixelplay.data.model.Playlist
+import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.model.SortOption // Added import
 import com.theveloper.pixelplay.data.model.TransitionSettings
 import com.theveloper.pixelplay.data.equalizer.EqualizerPreset // Added import
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -50,6 +52,24 @@ constructor(
         private val dataStore: DataStore<Preferences>,
         private val json: Json // Inyectar Json para serialización
 ) {
+    @Serializable
+    private data class SavedRemoteSong(
+        val id: String,
+        val title: String,
+        val artist: String,
+        val album: String,
+        val albumArtist: String? = null,
+        val albumArtUriString: String? = null,
+        val duration: Long,
+        val genre: String? = null,
+        val lyrics: String? = null,
+        val trackNumber: Int = 0,
+        val year: Int = 0,
+        val dateAdded: Long = 0,
+        val mimeType: String? = null,
+        val bitrate: Int? = null,
+        val sampleRate: Int? = null
+    )
 
     private object PreferencesKeys {
         val APP_REBRAND_DIALOG_SHOWN = booleanPreferencesKey("app_rebrand_dialog_shown")
@@ -66,6 +86,7 @@ constructor(
         val APP_THEME_MODE = stringPreferencesKey("app_theme_mode")
         val FAVORITE_SONG_IDS = stringSetPreferencesKey("favorite_song_ids")
         val USER_PLAYLISTS = stringPreferencesKey("user_playlists_json_v1")
+        val SAVED_REMOTE_SONGS = stringPreferencesKey("saved_remote_songs_json_v1")
         val PLAYLIST_SONG_ORDER_MODES = stringPreferencesKey("playlist_song_order_modes")
 
         // Sort Option Keys
@@ -553,10 +574,78 @@ constructor(
                 }
             }
 
+    val savedRemoteSongsFlow: Flow<List<Song>> =
+            dataStore.data.map { preferences ->
+                decodeSavedRemoteSongs(preferences[PreferencesKeys.SAVED_REMOTE_SONGS])
+                    .map { it.toSong() }
+            }
+
     private suspend fun savePlaylists(playlists: List<Playlist>) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.USER_PLAYLISTS] = json.encodeToString(playlists)
         }
+    }
+
+    suspend fun saveRemoteSong(song: Song) {
+        if (song.id.toLongOrNull() != null) return
+        dataStore.edit { preferences ->
+            val currentSongs = decodeSavedRemoteSongs(preferences[PreferencesKeys.SAVED_REMOTE_SONGS])
+            val updatedSongs = (currentSongs.filterNot { it.id == song.id } + song.toSavedRemoteSong())
+                .takeLast(500)
+            preferences[PreferencesKeys.SAVED_REMOTE_SONGS] = json.encodeToString(updatedSongs)
+        }
+    }
+
+    private fun decodeSavedRemoteSongs(jsonString: String?): List<SavedRemoteSong> {
+        if (jsonString.isNullOrBlank()) return emptyList()
+        return runCatching { json.decodeFromString<List<SavedRemoteSong>>(jsonString) }
+            .getOrDefault(emptyList())
+    }
+
+    private fun Song.toSavedRemoteSong(): SavedRemoteSong {
+        return SavedRemoteSong(
+            id = id,
+            title = title,
+            artist = artist,
+            album = album,
+            albumArtist = albumArtist,
+            albumArtUriString = albumArtUriString,
+            duration = duration,
+            genre = genre,
+            lyrics = lyrics,
+            trackNumber = trackNumber,
+            year = year,
+            dateAdded = dateAdded,
+            mimeType = mimeType,
+            bitrate = bitrate,
+            sampleRate = sampleRate
+        )
+    }
+
+    private fun SavedRemoteSong.toSong(): Song {
+        return Song(
+            id = id,
+            title = title,
+            artist = artist,
+            artistId = -1L,
+            artists = emptyList(),
+            album = album,
+            albumId = -1L,
+            albumArtist = albumArtist,
+            path = "",
+            contentUriString = "",
+            albumArtUriString = albumArtUriString,
+            duration = duration,
+            genre = genre,
+            lyrics = lyrics,
+            isFavorite = false,
+            trackNumber = trackNumber,
+            year = year,
+            dateAdded = dateAdded,
+            mimeType = mimeType,
+            bitrate = bitrate,
+            sampleRate = sampleRate
+        )
     }
 
     suspend fun createPlaylist(

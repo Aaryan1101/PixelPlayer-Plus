@@ -809,9 +809,12 @@ class PlayerViewModel @Inject constructor(
     val favoriteSongs: StateFlow<ImmutableList<Song>> = combine(
         favoriteSongIds,
         _masterAllSongs,
+        userPreferencesRepository.savedRemoteSongsFlow,
         currentFavoriteSortOptionStateFlow
-    ) { ids, allSongsList, sortOption ->
-        val favoriteSongsList = allSongsList.filter { song -> ids.contains(song.id) }
+    ) { ids, allSongsList, remoteSongs, sortOption ->
+        val availableSongs = (allSongsList + remoteSongs)
+            .distinctBy { it.id }
+        val favoriteSongsList = availableSongs.filter { song -> ids.contains(song.id) }
         when (sortOption) {
             SortOption.LikedSongTitleAZ -> favoriteSongsList.sortedBy { it.title.lowercase() }
             SortOption.LikedSongTitleZA -> favoriteSongsList.sortedByDescending { it.title.lowercase() }
@@ -4494,9 +4497,19 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun toggleFavorite() {
-        _stablePlayerState.value.currentSong?.id?.let { songId ->
+        _stablePlayerState.value.currentSong?.let { song ->
             viewModelScope.launch {
-                userPreferencesRepository.toggleFavoriteSong(songId)
+                userPreferencesRepository.toggleFavoriteSong(song.id)
+                
+                // If this is a YouTube song and we're liking it, add it to master list
+                if (YouTubeToSongMapper.isYouTubeSong(song)) {
+                    userPreferencesRepository.saveRemoteSong(song)
+                    val currentMasterList = _masterAllSongs.value.toMutableList()
+                    if (!currentMasterList.any { it.id == song.id }) {
+                        _masterAllSongs.value = (currentMasterList + song).toImmutableList()
+                        Log.d("PlayerViewModel", "Added YouTube song to master list: ${song.title}")
+                    }
+                }
             }
         }
     }
@@ -4504,6 +4517,19 @@ class PlayerViewModel @Inject constructor(
     fun toggleFavoriteSpecificSong(song: Song, removing: Boolean = false) {
         viewModelScope.launch {
             userPreferencesRepository.toggleFavoriteSong(song.id, removing)
+            
+            // If this is a YouTube song and we're liking it (not removing), add it to master list
+            if (!removing && YouTubeToSongMapper.isYouTubeSong(song)) {
+                userPreferencesRepository.saveRemoteSong(song)
+                val currentMasterList = _masterAllSongs.value.toMutableList()
+                if (!currentMasterList.any { it.id == song.id }) {
+                    _masterAllSongs.value = (currentMasterList + song).toImmutableList()
+                    Log.d("PlayerViewModel", "Added YouTube song to master list: ${song.title}")
+                }
+            }
+            
+            // If this is a YouTube song and we're removing it, consider removing from master list
+            // (Optional - keeping for now in case user wants to keep it in history)
         }
     }
 
@@ -5136,7 +5162,10 @@ class PlayerViewModel @Inject constructor(
     }
 
     suspend fun getSongs(songIds: List<String>) : List<Song>{
-        return musicRepository.getSongsByIds(songIds).first()
+        val localSongs = musicRepository.getSongsByIds(songIds).first()
+        val remoteSongs = userPreferencesRepository.savedRemoteSongsFlow.first()
+        val songsById = (localSongs + remoteSongs).associateBy { it.id }
+        return songIds.mapNotNull { songsById[it] }
     }
 
     //Sorting
@@ -6372,7 +6401,7 @@ class PlayerViewModel @Inject constructor(
 
         viewModelScope.launch {
             musicRepository.updateLyrics(
-                currentSong.id.toLong(),
+                currentSong,
                 result.rawLyrics
             )
         }
@@ -6381,7 +6410,7 @@ class PlayerViewModel @Inject constructor(
     fun resetLyricsForCurrentSong() {
         resetLyricsSearchState()
         viewModelScope.launch {
-            musicRepository.resetLyrics(stablePlayerState.value.currentSong!!.id.toLong())
+            stablePlayerState.value.currentSong?.let { musicRepository.resetLyrics(it) }
             _stablePlayerState.update { state -> state.copy(lyrics = null) }
             // loadLyricsForCurrentSong()
         }

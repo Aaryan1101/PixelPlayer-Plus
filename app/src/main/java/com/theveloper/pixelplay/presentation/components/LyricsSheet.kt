@@ -118,32 +118,30 @@ fun LyricsSheet(
 
     val context = LocalContext.current
 
-    var showFetchLyricsDialog by remember { mutableStateOf(false) }
+    var autoLyricsSearchSongId by remember { mutableStateOf<String?>(null) }
     // Flag to prevent dialog from showing briefly after reset
     var wasResetTriggered by remember { mutableStateOf(false) }
     // Save lyrics dialog state
     var showSaveLyricsDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(currentSong, lyrics, isLoadingLyrics) {
+    LaunchedEffect(currentSong?.id, lyrics, isLoadingLyrics) {
         if (currentSong != null && lyrics == null && !isLoadingLyrics) {
-            // Only show dialog if reset was not just triggered
-            if (!wasResetTriggered) {
-                showFetchLyricsDialog = true
+            if (!wasResetTriggered && autoLyricsSearchSongId != currentSong?.id) {
+                autoLyricsSearchSongId = currentSong?.id
+                onSearchLyrics(false)
             }
         } else if (lyrics != null || isLoadingLyrics) {
-            showFetchLyricsDialog = false
             wasResetTriggered = false // Reset the flag when lyrics are loaded
         }
     }
 
-    if (showFetchLyricsDialog) {
+    if (lyricsSearchUiState is LyricsSearchUiState.PickResult) {
         FetchLyricsDialog(
             uiState = lyricsSearchUiState,
             currentSong = currentSong,
             onConfirm = onSearchLyrics,
             onPickResult = onPickResult,
             onDismiss = {
-                showFetchLyricsDialog = false
                 onDismissLyricsSearch()
                 if (lyrics == null && !isLoadingLyrics) {
                     onBackClick()

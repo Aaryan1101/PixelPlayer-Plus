@@ -8,10 +8,9 @@ import org.schabi.newpipe.extractor.stream.StreamExtractor
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.stream.StreamType
 import org.schabi.newpipe.extractor.search.SearchExtractor
-import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.NewPipe
-import org.schabi.newpipe.extractor.downloader.Downloader
+import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -49,23 +48,54 @@ class YouTubeExtractorService @Inject constructor() {
      */
     suspend fun searchSongs(query: String): Result<List<StreamInfoItem>> = withContext(Dispatchers.IO) {
         try {
-            val searchExtractor = youtubeService.getSearchExtractor(query)
-            searchExtractor.fetchPage()
-            
-            val items = searchExtractor.initialPage.items
-                .filterIsInstance<StreamInfoItem>()
-                .filter { item ->
-                    // Filter for music content - videos or audio streams
-                    item.streamType == StreamType.VIDEO_STREAM || 
-                    item.streamType == StreamType.AUDIO_STREAM
+            val musicQuery = YouTubeToSongMapper.musicSearchQuery(query)
+            val items = searchYouTubeMusic(musicQuery)
+                .ifEmpty {
+                    Timber.d("YouTube Music returned no songs for query: $musicQuery, falling back to YouTube")
+                    searchYouTubeVideos(musicQuery)
                 }
-            
+
             Timber.d("Found ${items.size} songs for query: $query")
             Result.success(items)
         } catch (e: Exception) {
             Timber.e(e, "Error searching songs: $query")
             Result.failure(e)
         }
+    }
+
+    private fun searchYouTubeMusic(query: String): List<StreamInfoItem> {
+        val filters = listOf(
+            YoutubeSearchQueryHandlerFactory.MUSIC_SONGS,
+            YoutubeSearchQueryHandlerFactory.MUSIC_VIDEOS
+        )
+
+        return filters.firstNotNullOfOrNull { filter ->
+            runCatching {
+                val searchExtractor = youtubeService.getSearchExtractor(query, listOf(filter), "")
+                searchExtractor.fetchPage()
+                searchExtractor.initialPage.items
+                    .filterIsInstance<StreamInfoItem>()
+                    .filter(::isPlayableStream)
+                    .filter(YouTubeToSongMapper::isLikelyMusicContent)
+            }.onFailure { error ->
+                Timber.w(error, "YouTube Music search failed for filter: $filter")
+            }.getOrNull()?.takeIf { it.isNotEmpty() }
+        } ?: emptyList()
+    }
+
+    private fun searchYouTubeVideos(query: String): List<StreamInfoItem> {
+        val searchExtractor = youtubeService.getSearchExtractor(query)
+        searchExtractor.fetchPage()
+
+        return searchExtractor.initialPage.items
+            .filterIsInstance<StreamInfoItem>()
+            .filter(::isPlayableStream)
+            .filter(YouTubeToSongMapper::isLikelyMusicContent)
+    }
+
+    private fun isPlayableStream(item: StreamInfoItem): Boolean {
+        return item.streamType == StreamType.VIDEO_STREAM ||
+            item.streamType == StreamType.AUDIO_STREAM
     }
 
     /**
@@ -79,10 +109,8 @@ class YouTubeExtractorService @Inject constructor() {
                 val nextPage = searchExtractor.getPage(page)
                 val items = nextPage.items
                     .filterIsInstance<StreamInfoItem>()
-                    .filter { item ->
-                        item.streamType == StreamType.VIDEO_STREAM || 
-                        item.streamType == StreamType.AUDIO_STREAM
-                    }
+                    .filter(::isPlayableStream)
+                    .filter(YouTubeToSongMapper::isLikelyMusicContent)
                 
                 Result.success(items)
             } catch (e: Exception) {
@@ -284,10 +312,8 @@ suspend fun getStreamInfo(videoUrl: String): Result<StreamExtractor> = withConte
             val streamExtractor = streamInfoResult.getOrThrow()
             val relatedItems = streamExtractor.relatedItems?.items
                 ?.filterIsInstance<StreamInfoItem>()
-                ?.filter { item ->
-                    item.streamType == StreamType.VIDEO_STREAM || 
-                    item.streamType == StreamType.AUDIO_STREAM
-                } ?: emptyList()
+                ?.filter(::isPlayableStream)
+                ?.filter(YouTubeToSongMapper::isLikelyMusicContent) ?: emptyList()
             
             Timber.d("Found ${relatedItems.size} related videos")
             Result.success(relatedItems)

@@ -269,9 +269,7 @@ class PlaylistViewModel @Inject constructor(
                             ?: PlaylistSongsOrderMode.Manual
 
                         // Colectar la lista de canciones del Flow devuelto por el repositorio en un hilo de IO
-                        val songsList: List<Song> = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            musicRepository.getSongsByIds(playlist.songIds).first()
-                        }
+                        val songsList: List<Song> = resolveSongsByIds(playlist.songIds)
 
                         val orderedSongs = when (orderMode) {
                             is PlaylistSongsOrderMode.Sorted -> applySortToSongs(songsList, orderMode.option)
@@ -366,6 +364,18 @@ class PlaylistViewModel @Inject constructor(
             )
             _playlistCreationEvent.emit(true)
         }
+    }
+
+    private suspend fun resolveSongsByIds(songIds: List<String>): List<Song> {
+        if (songIds.isEmpty()) return emptyList()
+
+        val localSongs = withContext(Dispatchers.IO) {
+            musicRepository.getSongsByIds(songIds).first()
+        }
+        val remoteSongs = userPreferencesRepository.savedRemoteSongsFlow.first()
+        val songsById = (localSongs + remoteSongs).associateBy { it.id }
+
+        return songIds.mapNotNull { songsById[it] }
     }
 
 
@@ -623,6 +633,12 @@ class PlaylistViewModel @Inject constructor(
             if (currentPlaylistId != null && removedFromPlaylists.contains (currentPlaylistId)) {
                 removeSongFromPlaylist(currentPlaylistId, songId)
             }
+        }
+    }
+
+    fun saveRemoteSong(song: Song) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveRemoteSong(song)
         }
     }
 

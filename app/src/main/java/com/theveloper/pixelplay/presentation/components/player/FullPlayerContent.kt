@@ -240,8 +240,9 @@ fun FullPlayerContent(
     val onLyricsClick = {
         val lyrics = stablePlayerState.lyrics
         if (lyrics?.synced.isNullOrEmpty() && lyrics?.plain.isNullOrEmpty()) {
-            // Si no hay letra, mostramos el diálogo para buscar
-            showFetchLyricsDialog = true
+            // Si no hay letra, abrimos el sheet y buscamos directamente
+            showLyricsSheet = true
+            playerViewModel.fetchLyricsForCurrentSong(forcePickResults = false)
         } else {
             // Si hay letra, mostramos el sheet directamente
             showLyricsSheet = true

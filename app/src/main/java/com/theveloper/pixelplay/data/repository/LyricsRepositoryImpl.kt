@@ -27,8 +27,96 @@ import java.net.UnknownHostException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
+import kotlin.text.Regex
+
+private fun cleanTitle(title: String): String {
+    return title
+        .replace(Regex("\\(.*?\\)"), "")
+        .replace(Regex("\\[.*?\\]"), "")
+        .replace(Regex("(?i)\\bfull\\s+video\\s+song\\b"), "")
+        .replace(Regex("(?i)\\bofficial\\s+(music\\s+)?video\\b"), "")
+        .replace(Regex("(?i)\\b(full\\s+song|lyrical\\s+video|lyrics?|audio|hd|4k|8k|60fps)\\b"), "")
+        .replace(Regex("(?i)\\b(feat\\.?|ft\\.?|featuring)\\b.*$"), "")
+        .replace(Regex("\\s+"), " ")
+        .trim(' ', '|', '-', ':')
+}
+
+private fun buildSearchTitles(song: Song): List<String> {
+    val cleanedTitle = cleanTitle(song.title)
+    val delimitedParts = cleanedTitle
+        .split(Regex("\\s*[|\\u2022\\u00B7]+\\s*"))
+        .map(::cleanTitle)
+        .filter { it.length > 2 }
+
+    val titles = if (song.id.startsWith("youtube_")) {
+        delimitedParts + cleanedTitle
+    } else {
+        listOf(cleanedTitle)
+    }
+
+    return titles
+        .filter { it.length > 2 }
+        .distinctBy { it.lowercase() }
+}
+
+private fun shouldUseArtistFilter(song: Song): Boolean {
+    if (!song.id.startsWith("youtube_")) return true
+
+    val artist = song.displayArtist.lowercase()
+    return artist !in setOf("t-series", "vevo", "youtube", "unknown artist")
+        && !artist.endsWith("records")
+        && !artist.endsWith("music")
+        && !artist.endsWith("official")
+}
 
 private fun Lyrics.isValid(): Boolean = !synced.isNullOrEmpty() || !plain.isNullOrEmpty()
+
+private fun normalizedTokens(value: String): Set<String> {
+    return value
+        .lowercase()
+        .replace(Regex("[^\\p{L}\\p{N}\\s]"), " ")
+        .split(Regex("\\s+"))
+        .map { it.trim() }
+        .filter { it.length > 2 }
+        .filterNot { it in setOf("official", "video", "song", "full", "lyrics", "lyric", "audio", "music") }
+        .toSet()
+}
+
+private fun tokenOverlapScore(source: Set<String>, target: Set<String>): Double {
+    if (source.isEmpty() || target.isEmpty()) return 0.0
+    return source.intersect(target).size.toDouble() / source.size
+}
+
+private fun lyricsCoverageRatio(lyrics: Lyrics, songDurationSeconds: Long): Double {
+    val lastSyncedMs = lyrics.synced?.maxOfOrNull { it.time } ?: return 1.0
+    val songDurationMs = songDurationSeconds * 1000
+    if (songDurationMs <= 0) return 1.0
+    return lastSyncedMs.toDouble() / songDurationMs.toDouble()
+}
+
+private fun scoreLyricsResult(
+    response: LrcLibResponse,
+    parsedLyrics: Lyrics,
+    song: Song,
+    searchTitles: List<String>
+): Double {
+    val responseTitleTokens = normalizedTokens(response.name)
+    val bestTitleOverlap = searchTitles.maxOfOrNull { title ->
+        tokenOverlapScore(normalizedTokens(title), responseTitleTokens)
+    } ?: 0.0
+    val artistOverlap = tokenOverlapScore(normalizedTokens(song.displayArtist), normalizedTokens(response.artistName))
+    val songDurationSeconds = song.duration / 1000
+    val durationDiff = abs(response.duration - songDurationSeconds)
+    val durationScore = (1.0 - (durationDiff / 45.0)).coerceIn(0.0, 1.0)
+    val coverageScore = lyricsCoverageRatio(parsedLyrics, songDurationSeconds).coerceIn(0.0, 1.0)
+    val syncedBonus = if (!response.syncedLyrics.isNullOrEmpty()) 0.25 else 0.0
+
+    return bestTitleOverlap * 4.0 +
+        artistOverlap * 1.5 +
+        durationScore * 1.5 +
+        coverageScore +
+        syncedBonus
+}
 
 @Singleton
 class LyricsRepositoryImpl @Inject constructor(
@@ -70,10 +158,8 @@ class LyricsRepositoryImpl @Inject constructor(
                     val best = results.first()
                     val rawLyricsToSave = best.rawLyrics
                     
-                    musicDao.updateLyrics(song.id.toLong(), rawLyricsToSave)
+                    saveLyrics(song, rawLyricsToSave, best.lyrics)
                     
-                    val cacheKey = generateCacheKey(song.id)
-                    lyricsCache.put(cacheKey, best.lyrics)
                     LogUtils.d(this@LyricsRepositoryImpl, "Fetched and cached remote lyrics for: ${song.title}")
                     
                     return@withContext Result.success(Pair(best.lyrics, rawLyricsToSave))
@@ -96,10 +182,7 @@ class LyricsRepositoryImpl @Inject constructor(
                     return@withContext Result.failure(LyricsException("Parsed lyrics are empty"))
                 }
                 
-                musicDao.updateLyrics(song.id.toLong(), rawLyricsToSave)
-                
-                val cacheKey = generateCacheKey(song.id)
-                lyricsCache.put(cacheKey, parsedLyrics)
+                saveLyrics(song, rawLyricsToSave, parsedLyrics)
                 LogUtils.d(this@LyricsRepositoryImpl, "Fetched and cached remote lyrics (exact match) for: ${song.title}")
                 
                 Result.success(Pair(parsedLyrics, rawLyricsToSave))
@@ -124,27 +207,29 @@ class LyricsRepositoryImpl @Inject constructor(
 
     override suspend fun searchRemote(song: Song): Result<Pair<String, List<LyricsSearchResult>>> = withContext(Dispatchers.IO) {
         try {
-            LogUtils.d(this@LyricsRepositoryImpl, "Searching remote for lyrics for: ${song.title} by ${song.displayArtist}")
+            LogUtils.d(this@LyricsRepositoryImpl, "Fetching lyrics from remote for: ${song.title}")
             
-            val combinedQuery = "${song.title} ${song.displayArtist}"
+            val isYouTubeSong = song.id.startsWith("youtube_")
+            val searchTitles = buildSearchTitles(song)
+            val fallbackQuery = searchTitles.firstOrNull() ?: cleanTitle(song.title)
+            val useArtistFilter = shouldUseArtistFilter(song)
             
             // SEQUENTIAL STRATEGY: Try each search strategy one by one
             // This avoids rate limiting issues that can occur with parallel requests
-            // Stop as soon as we get a valid result
-            val strategies: List<suspend () -> Array<LrcLibResponse>?> = listOf(
-                // Strategy 1: Combined query with artist (most specific)
-                { runCatching { lrcLibApiService.searchLyrics(query = combinedQuery, artistName = song.displayArtist) }.getOrNull() },
-                // Strategy 2: Track name with artist
-                { runCatching { lrcLibApiService.searchLyrics(trackName = song.title, artistName = song.displayArtist) }.getOrNull() },
-                // Strategy 3: Track name only
-                { runCatching { lrcLibApiService.searchLyrics(trackName = song.title) }.getOrNull() },
-                // Strategy 4: Simple query (fallback)
-                { runCatching { lrcLibApiService.searchLyrics(query = song.title) }.getOrNull() }
-            )
+            val strategies = searchTitles.flatMap { searchTitle ->
+                buildList<suspend () -> Array<LrcLibResponse>?> {
+                    if (useArtistFilter) {
+                        add { runCatching { lrcLibApiService.searchLyrics(query = "$searchTitle ${song.displayArtist}", artistName = song.displayArtist) }.getOrNull() }
+                        add { runCatching { lrcLibApiService.searchLyrics(trackName = searchTitle, artistName = song.displayArtist) }.getOrNull() }
+                    }
+                    add { runCatching { lrcLibApiService.searchLyrics(trackName = searchTitle) }.getOrNull() }
+                    add { runCatching { lrcLibApiService.searchLyrics(query = searchTitle) }.getOrNull() }
+                }
+            }
             
             var allResults: List<LrcLibResponse> = emptyList()
             for ((index, strategy) in strategies.withIndex()) {
-                LogUtils.d(this@LyricsRepositoryImpl, "Trying search strategy ${index + 1}/4...")
+                LogUtils.d(this@LyricsRepositoryImpl, "Trying search strategy ${index + 1}/${strategies.size}...")
                 val result = strategy()
                 if (!result.isNullOrEmpty()) {
                     LogUtils.d(this@LyricsRepositoryImpl, "Strategy ${index + 1} returned ${result.size} results")
@@ -160,10 +245,18 @@ class LyricsRepositoryImpl @Inject constructor(
             if (uniqueResults.isNotEmpty()) {
                 val songDurationSeconds = song.duration / 1000
                 val results = uniqueResults.mapNotNull { response ->
-                    // Increased duration tolerance from 5 to 15 seconds for better matching
+                    val durationToleranceSeconds = if (isYouTubeSong) 60 else 15
                     val durationDiff = abs(response.duration - songDurationSeconds)
-                    if (durationDiff > 15) {
+                    if (durationDiff > durationToleranceSeconds) {
                         LogUtils.d(this@LyricsRepositoryImpl, "  Skipping '${response.name}' - duration mismatch: ${response.duration}s vs ${songDurationSeconds}s (diff: ${durationDiff}s)")
+                        return@mapNotNull null
+                    }
+
+                    val bestTitleOverlap = searchTitles.maxOfOrNull { title ->
+                        tokenOverlapScore(normalizedTokens(title), normalizedTokens(response.name))
+                    } ?: 0.0
+                    if (bestTitleOverlap < 0.5) {
+                        LogUtils.d(this@LyricsRepositoryImpl, "  Skipping '${response.name}' - weak title match for '${song.title}'")
                         return@mapNotNull null
                     }
 
@@ -173,24 +266,29 @@ class LyricsRepositoryImpl @Inject constructor(
                         LogUtils.w(this@LyricsRepositoryImpl, "Parsed lyrics are empty for: ${song.title}")
                         return@mapNotNull null
                     }
+                    val coverageRatio = lyricsCoverageRatio(parsedLyrics, songDurationSeconds)
+                    if (!response.syncedLyrics.isNullOrEmpty() && coverageRatio < 0.65) {
+                        LogUtils.d(this@LyricsRepositoryImpl, "  Skipping '${response.name}' - synced lyrics end too early (${(coverageRatio * 100).toInt()}% coverage)")
+                        return@mapNotNull null
+                    }
+
                     val hasSynced = !response.syncedLyrics.isNullOrEmpty()
                     LogUtils.d(this@LyricsRepositoryImpl, "  Found: ${response.name} by ${response.artistName} (synced: $hasSynced)")
                     LyricsSearchResult(response, parsedLyrics, rawLyrics)
                 }
-                // Sort results: prioritize entries with synced lyrics
-                .sortedByDescending { !it.record.syncedLyrics.isNullOrEmpty() }
+                .sortedByDescending { scoreLyricsResult(it.record, it.lyrics, song, searchTitles) }
 
                 if (results.isNotEmpty()) {
                     val syncedCount = results.count { !it.record.syncedLyrics.isNullOrEmpty() }
                     LogUtils.d(this@LyricsRepositoryImpl, "Found ${results.size} lyrics for: ${song.title} ($syncedCount with synced)")
-                    Result.success(Pair(combinedQuery, results))
+                    Result.success(Pair(fallbackQuery, results))
                 } else {
                     LogUtils.d(this@LyricsRepositoryImpl, "No matching lyrics found for: ${song.title}")
-                    Result.failure(NoLyricsFoundException(combinedQuery))
+                    Result.failure(NoLyricsFoundException(fallbackQuery))
                 }
             } else {
                 LogUtils.d(this@LyricsRepositoryImpl, "No lyrics found remotely for: ${song.title}")
-                Result.failure(NoLyricsFoundException(combinedQuery))
+                Result.failure(NoLyricsFoundException(fallbackQuery))
             }
         } catch (e: Exception) {
             LogUtils.e(this@LyricsRepositoryImpl, e, "Error searching remote for lyrics")
@@ -220,11 +318,31 @@ class LyricsRepositoryImpl @Inject constructor(
         LogUtils.d(this@LyricsRepositoryImpl, "Updated and cached lyrics for songId: $songId")
     }
 
+    override suspend fun updateLyrics(song: Song, lyricsContent: String): Unit = withContext(Dispatchers.IO) {
+        LogUtils.d(this@LyricsRepositoryImpl, "Updating lyrics for songId: ${song.id}")
+
+        val parsedLyrics = LyricsUtils.parseLyrics(lyricsContent)
+        if (!parsedLyrics.isValid()) {
+            LogUtils.w(this@LyricsRepositoryImpl, "Attempted to save empty lyrics for songId: ${song.id}")
+            return@withContext
+        }
+
+        saveLyrics(song, lyricsContent, parsedLyrics)
+        LogUtils.d(this@LyricsRepositoryImpl, "Updated and cached lyrics for songId: ${song.id}")
+    }
+
     override suspend fun resetLyrics(songId: Long): Unit = withContext(Dispatchers.IO) {
         LogUtils.d(this, "Resetting lyrics for songId: $songId")
         val cacheKey = generateCacheKey(songId.toString())
         lyricsCache.remove(cacheKey)
         musicDao.resetLyrics(songId)
+    }
+
+    override suspend fun resetLyrics(song: Song): Unit = withContext(Dispatchers.IO) {
+        LogUtils.d(this, "Resetting lyrics for songId: ${song.id}")
+        val cacheKey = generateCacheKey(song.id)
+        lyricsCache.remove(cacheKey)
+        song.id.toLongOrNull()?.let { musicDao.resetLyrics(it) }
     }
 
     override suspend fun resetAllLyrics(): Unit = withContext(Dispatchers.IO) {
@@ -280,6 +398,11 @@ class LyricsRepositoryImpl @Inject constructor(
     }
 
     private fun generateCacheKey(songId: String): String = songId
+
+    private suspend fun saveLyrics(song: Song, rawLyrics: String, parsedLyrics: Lyrics) {
+        song.id.toLongOrNull()?.let { musicDao.updateLyrics(it, rawLyrics) }
+        lyricsCache.put(generateCacheKey(song.id), parsedLyrics)
+    }
 
     private fun createTempFileFromUri(uri: Uri): File? {
         return try {
