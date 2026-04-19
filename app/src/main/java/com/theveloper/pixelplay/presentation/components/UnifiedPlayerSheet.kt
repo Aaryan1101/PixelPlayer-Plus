@@ -1207,7 +1207,7 @@ fun UnifiedPlayerSheet(
                                                 currentPlaybackQueue = currentPlaybackQueue,
                                                 currentQueueSourceName = currentQueueSourceName,
                                                 isShuffleEnabled = stablePlayerState.isShuffleEnabled,
-                                                repeatMode = stablePlayerState.repeatMode,
+                                                repeatMode = playerViewModel.visualRepeatMode.collectAsState().value,
                                                 expansionFractionProvider = { playerContentExpansionFraction.value },
                                                 currentSheetState = currentSheetContentState,
                                                 carouselStyle = carouselStyle,
@@ -1274,7 +1274,7 @@ fun UnifiedPlayerSheet(
                                     currentPlaybackQueue = currentPlaybackQueue,
                                     currentQueueSourceName = currentQueueSourceName,
                                     isShuffleEnabled = stablePlayerState.isShuffleEnabled,
-                                    repeatMode = stablePlayerState.repeatMode,
+                                    repeatMode = playerViewModel.visualRepeatMode.collectAsState().value,
                                     expansionFractionProvider = { 1f },
                                     currentSheetState = PlayerSheetState.EXPANDED,
                                     carouselStyle = carouselStyle,
@@ -1393,7 +1393,7 @@ fun UnifiedPlayerSheet(
                                         to
                                     )
                                 },
-                                repeatMode = stablePlayerState.repeatMode,
+                                repeatMode = playerViewModel.visualRepeatMode.collectAsState().value,
                                 isShuffleOn = stablePlayerState.isShuffleEnabled,
                                 onToggleRepeat = { playerViewModel.cycleRepeatMode() },
                                 onToggleShuffle = { playerViewModel.toggleShuffle() },

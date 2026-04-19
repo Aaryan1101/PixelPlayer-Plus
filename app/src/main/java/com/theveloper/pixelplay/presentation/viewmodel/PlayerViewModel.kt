@@ -336,6 +336,10 @@ class PlayerViewModel @Inject constructor(
     private val _masterAllSongs = MutableStateFlow<ImmutableList<Song>>(persistentListOf())
     private val _stablePlayerState = MutableStateFlow(StablePlayerState())
     val stablePlayerState: StateFlow<StablePlayerState> = _stablePlayerState.asStateFlow()
+    
+    // Separate visual state for repeat button cycling
+    private val _visualRepeatMode = MutableStateFlow(Player.REPEAT_MODE_OFF)
+    val visualRepeatMode: StateFlow<Int> = _visualRepeatMode.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val currentSongArtists: StateFlow<List<Artist>> = stablePlayerState
@@ -4456,17 +4460,29 @@ class PlayerViewModel @Inject constructor(
             }
             viewModelScope.launch { userPreferencesRepository.setRepeatMode(mappedLocalMode) }
             _stablePlayerState.update { it.copy(repeatMode = mappedLocalMode) }
+            _visualRepeatMode.value = mappedLocalMode
         } else {
-            val currentMode = _stablePlayerState.value.repeatMode
-            val newMode = when (currentMode) {
+            // Cycle visual state through all 3 modes
+            val currentVisualMode = _visualRepeatMode.value
+            val newVisualMode = when (currentVisualMode) {
                 Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ONE
-                Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE // Stay in repeat one mode (infinite)
+                Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ALL
                 Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_OFF
                 else -> Player.REPEAT_MODE_OFF
             }
-            mediaController?.repeatMode = newMode
-            viewModelScope.launch { userPreferencesRepository.setRepeatMode(newMode) }
-            _stablePlayerState.update { it.copy(repeatMode = newMode) }
+            
+            // Determine actual repeat behavior based on visual state
+            val actualRepeatMode = when (newVisualMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_OFF
+                Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE // Both visual states use same actual behavior
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE // Visual repeat all still uses repeat one behavior
+                else -> Player.REPEAT_MODE_OFF
+            }
+            
+            mediaController?.repeatMode = actualRepeatMode
+            viewModelScope.launch { userPreferencesRepository.setRepeatMode(actualRepeatMode) }
+            _stablePlayerState.update { it.copy(repeatMode = actualRepeatMode) }
+            _visualRepeatMode.value = newVisualMode
         }
     }
 
