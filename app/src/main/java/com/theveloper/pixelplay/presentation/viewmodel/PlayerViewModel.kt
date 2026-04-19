@@ -4460,7 +4460,7 @@ class PlayerViewModel @Inject constructor(
             val currentMode = _stablePlayerState.value.repeatMode
             val newMode = when (currentMode) {
                 Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ONE
-                Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE // Stay in repeat one mode (infinite)
                 Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_OFF
                 else -> Player.REPEAT_MODE_OFF
             }
