@@ -795,6 +795,7 @@ class PlayerViewModel @Inject constructor(
             .setListener(mediaControllerListener)
             .buildAsync()
     private var pendingRepeatMode: Int? = null
+    private var pendingSingleRepeatSongId: String? = null
 
     private var pendingPlaybackAction: (() -> Unit)? = null
 
@@ -3392,6 +3393,25 @@ class PlayerViewModel @Inject constructor(
                 }
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
+                    val repeatedSongId = mediaItem?.mediaId
+                    if (
+                        _visualRepeatMode.value == Player.REPEAT_MODE_ONE &&
+                        pendingSingleRepeatSongId != null &&
+                        pendingSingleRepeatSongId == repeatedSongId
+                    ) {
+                        pendingSingleRepeatSongId = null
+                        val controller = mediaController
+                        if (controller != null && controller.repeatMode != Player.REPEAT_MODE_OFF) {
+                            controller.repeatMode = Player.REPEAT_MODE_OFF
+                        }
+                        viewModelScope.launch { userPreferencesRepository.setRepeatMode(Player.REPEAT_MODE_OFF) }
+                        _stablePlayerState.update { it.copy(repeatMode = Player.REPEAT_MODE_OFF) }
+                    }
+                } else {
+                    pendingSingleRepeatSongId = null
+                }
+
                 transitionSchedulerJob?.cancel()
                 lyricsLoadingJob?.cancel()
                 transitionSchedulerJob = viewModelScope.launch {
@@ -4445,9 +4465,9 @@ class PlayerViewModel @Inject constructor(
             val remoteMediaClient = castSession.remoteMediaClient
             val currentRepeatMode = remoteMediaClient?.mediaStatus?.getQueueRepeatMode() ?: MediaStatus.REPEAT_MODE_REPEAT_OFF
             val newMode = when (currentRepeatMode) {
-                MediaStatus.REPEAT_MODE_REPEAT_OFF -> MediaStatus.REPEAT_MODE_REPEAT_ALL
-                MediaStatus.REPEAT_MODE_REPEAT_ALL -> MediaStatus.REPEAT_MODE_REPEAT_SINGLE
-                MediaStatus.REPEAT_MODE_REPEAT_SINGLE -> MediaStatus.REPEAT_MODE_REPEAT_OFF
+                MediaStatus.REPEAT_MODE_REPEAT_OFF -> MediaStatus.REPEAT_MODE_REPEAT_SINGLE
+                MediaStatus.REPEAT_MODE_REPEAT_SINGLE -> MediaStatus.REPEAT_MODE_REPEAT_ALL
+                MediaStatus.REPEAT_MODE_REPEAT_ALL -> MediaStatus.REPEAT_MODE_REPEAT_OFF
                 // If user cycles repeat while shuffling, turn everything off.
                 MediaStatus.REPEAT_MODE_REPEAT_ALL_AND_SHUFFLE -> MediaStatus.REPEAT_MODE_REPEAT_OFF
                 else -> MediaStatus.REPEAT_MODE_REPEAT_OFF
@@ -4474,11 +4494,17 @@ class PlayerViewModel @Inject constructor(
             // Determine actual repeat behavior based on visual state
             val actualRepeatMode = when (newVisualMode) {
                 Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_OFF
-                Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE // Both visual states use same actual behavior
-                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE // Visual repeat all still uses repeat one behavior
+                Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
                 else -> Player.REPEAT_MODE_OFF
             }
-            
+
+            pendingSingleRepeatSongId = if (newVisualMode == Player.REPEAT_MODE_ONE) {
+                mediaController?.currentMediaItem?.mediaId
+            } else {
+                null
+            }
+
             mediaController?.repeatMode = actualRepeatMode
             viewModelScope.launch { userPreferencesRepository.setRepeatMode(actualRepeatMode) }
             _stablePlayerState.update { it.copy(repeatMode = actualRepeatMode) }
