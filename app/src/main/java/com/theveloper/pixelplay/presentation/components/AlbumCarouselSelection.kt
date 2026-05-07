@@ -62,7 +62,7 @@ fun AlbumCarouselSection(
         pagerState = carouselState.pagerState,
         queue = queue,
         radius = 1,
-        targetSize = Size(600, 600)
+        targetSize = Size(1200, 1200)
     )
 
     // Player -> Carousel
@@ -122,7 +122,7 @@ fun AlbumCarouselSection(
                         uri = song.albumArtUriString,
                         title = song.title,
                         modifier = Modifier.fillMaxSize(),
-                        targetSize = Size(600, 600)
+                        targetSize = Size(1200, 1200)
                     )
                 }
             }
