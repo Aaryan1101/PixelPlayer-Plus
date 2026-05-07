@@ -2833,10 +2833,12 @@ class PlayerViewModel @Inject constructor(
      */
     private fun processRelatedVideosInBatches(currentSong: Song, relatedSongs: List<Song>) {
         viewModelScope.launch {
-            // Start with first batch of 3 songs for immediate queue
+            // Start with first batch of 3 songs for immediate queue.
+            // Filter out the current song from related results to prevent it appearing
+            // as a duplicate in the Next Up list.
             val batchSize = 3
-            val firstBatch = relatedSongs.take(batchSize)
-            
+            val firstBatch = relatedSongs.filter { it.id != currentSong.id }.take(batchSize)
+
             // Create initial queue with current song + first batch
             val initialQueue = listOf(currentSong) + firstBatch
             updateCurrentQueueWithRelatedSongs(initialQueue)
@@ -3393,24 +3395,24 @@ class PlayerViewModel @Inject constructor(
                 }
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
-                    val repeatedSongId = mediaItem?.mediaId
-                    if (
-                        _visualRepeatMode.value == Player.REPEAT_MODE_ONE &&
-                        pendingSingleRepeatSongId != null &&
-                        pendingSingleRepeatSongId == repeatedSongId
+                // Intercept AUTO transitions to implement single-repeat without using REPEAT_MODE_ONE.
+                // When the watched song naturally ends and ExoPlayer moves to the next item,
+                // we seek back to it for exactly one replay, then clear the pending state.
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && pendingSingleRepeatSongId != null) {
+                    val prevIdx = playerCtrl.previousMediaItemIndex
+                    if (prevIdx != C.INDEX_UNSET &&
+                        playerCtrl.getMediaItemAt(prevIdx).mediaId == pendingSingleRepeatSongId
                     ) {
                         pendingSingleRepeatSongId = null
-                        val controller = mediaController
-                        if (controller != null && controller.repeatMode != Player.REPEAT_MODE_OFF) {
-                            controller.repeatMode = Player.REPEAT_MODE_OFF
-                        }
-                        viewModelScope.launch { userPreferencesRepository.setRepeatMode(Player.REPEAT_MODE_OFF) }
+                        playerCtrl.seekTo(prevIdx, 0L)
+                        _visualRepeatMode.value = Player.REPEAT_MODE_OFF
                         _stablePlayerState.update { it.copy(repeatMode = Player.REPEAT_MODE_OFF) }
+                        viewModelScope.launch { userPreferencesRepository.setRepeatMode(Player.REPEAT_MODE_OFF) }
+                        return
                     }
-                } else {
-                    pendingSingleRepeatSongId = null
                 }
+                // Clear pending single-repeat on any other transition (user skipped, seek, etc.)
+                pendingSingleRepeatSongId = null
 
                 transitionSchedulerJob?.cancel()
                 lyricsLoadingJob?.cancel()
@@ -3492,6 +3494,17 @@ class PlayerViewModel @Inject constructor(
                 }
                 if (playbackState == Player.STATE_ENDED) {
                     listeningStatsTracker.finalizeCurrentSession()
+                    // Single-repeat on the last queue item: no AUTO transition fires, so
+                    // we detect STATE_ENDED and replay the song once before clearing repeat.
+                    val pendingId = pendingSingleRepeatSongId
+                    if (pendingId != null && playerCtrl.currentMediaItem?.mediaId == pendingId) {
+                        pendingSingleRepeatSongId = null
+                        playerCtrl.seekTo(playerCtrl.currentMediaItemIndex, 0L)
+                        playerCtrl.play()
+                        _visualRepeatMode.value = Player.REPEAT_MODE_OFF
+                        _stablePlayerState.update { it.copy(repeatMode = Player.REPEAT_MODE_OFF) }
+                        viewModelScope.launch { userPreferencesRepository.setRepeatMode(Player.REPEAT_MODE_OFF) }
+                    }
                 }
                 if (playbackState == Player.STATE_IDLE && playerCtrl.mediaItemCount == 0) {
                     if (!_isCastConnecting.value && !_isRemotePlaybackActive.value) {
@@ -4491,11 +4504,13 @@ class PlayerViewModel @Inject constructor(
                 else -> Player.REPEAT_MODE_OFF
             }
             
-            // Determine actual repeat behavior based on visual state
+            // Determine actual ExoPlayer repeat mode.
+            // REPEAT_ONE is handled manually via AUTO-transition interception so ExoPlayer
+            // stays at REPEAT_MODE_OFF; REPEAT_ALL uses ExoPlayer's native looping.
             val actualRepeatMode = when (newVisualMode) {
                 Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_OFF
-                Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE
-                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_OFF
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ALL
                 else -> Player.REPEAT_MODE_OFF
             }
 
@@ -5092,6 +5107,16 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun nextSong() {
+        // When repeat is active, forward restarts the current song rather than skipping.
+        val visualRepeat = _visualRepeatMode.value
+        if (visualRepeat != Player.REPEAT_MODE_OFF) {
+            mediaController?.let {
+                it.seekTo(0L)
+                it.play()
+            }
+            return
+        }
+
         val castSession = _castSession.value
         if (castSession != null && castSession.remoteMediaClient != null) {
             val queue = _playerUiState.value.currentPlaybackQueue
@@ -5115,6 +5140,16 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun previousSong() {
+        // When repeat is active, back restarts the current song rather than going to the previous.
+        val visualRepeat = _visualRepeatMode.value
+        if (visualRepeat != Player.REPEAT_MODE_OFF) {
+            mediaController?.let {
+                it.seekTo(0L)
+                it.play()
+            }
+            return
+        }
+
         val castSession = _castSession.value
         if (castSession != null && castSession.remoteMediaClient != null) {
             val queue = _playerUiState.value.currentPlaybackQueue
