@@ -1,39 +1,44 @@
 package com.theveloper.pixelplay.presentation.screens
 
-import android.widget.Toast
 import androidx.activity.compose.ReportDrawnWhen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeExtendedFloatingActionButton
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -44,9 +49,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import com.theveloper.pixelplay.presentation.components.BetaInfoBottomSheet
-import com.theveloper.pixelplay.presentation.components.ChangelogBottomSheet
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -62,14 +67,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
-import com.theveloper.pixelplay.presentation.components.AlbumArtCollage
-import com.theveloper.pixelplay.presentation.components.AppSidebarDrawer
+import com.theveloper.pixelplay.presentation.components.BetaInfoBottomSheet
+import com.theveloper.pixelplay.presentation.components.ChangelogBottomSheet
 import com.theveloper.pixelplay.presentation.components.DailyMixSection
-import com.theveloper.pixelplay.presentation.components.DrawerDestination
 import com.theveloper.pixelplay.presentation.components.HomeGradientTopBar
 import com.theveloper.pixelplay.presentation.components.HomeOptionsBottomSheet
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
-import com.theveloper.pixelplay.presentation.components.NavBarContentHeight
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.components.StatsOverviewCard
 import com.theveloper.pixelplay.presentation.components.subcomps.PlayingEqIcon
@@ -78,12 +81,14 @@ import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StatsViewModel
 import com.theveloper.pixelplay.ui.theme.ExpTitleTypography
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
+import java.util.Calendar
 
-// Modern HomeScreen with collapsible top bar and staggered grid layout
+// Modern HomeScreen with Featured hero card and Recently played row.
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,13 +100,10 @@ fun HomeScreen(
     onOpenSidebar: () -> Unit
 ) {
     val context = LocalContext.current
-    // DETECTAR MODO BENCHMARK
     val isBenchmarkMode = remember {
         (context as? android.app.Activity)?.intent?.getBooleanExtra("is_benchmark", false) ?: false
     }
     val statsViewModel: StatsViewModel = hiltViewModel()
-    val settingsUiState by settingsViewModel.uiState.collectAsState()
-    // 1) Observar sólo la lista de canciones, que cambia con poca frecuencia
     val allSongs by playerViewModel.allSongsFlow.collectAsState(initial = emptyList())
     val dailyMixSongs by playerViewModel.dailyMixSongs.collectAsState()
     val curatedYourMixSongs by playerViewModel.yourMixSongs.collectAsState()
@@ -118,18 +120,13 @@ fun HomeScreen(
         yourMixSongs.isNotEmpty() || isBenchmarkMode
     }
 
-    val yourMixSong: String = "Today's Mix for you"
-
-    // 2) Observar sólo el currentSong (o null) para saber si mostrar padding
     val currentSong by remember(playerViewModel.stablePlayerState) {
         playerViewModel.stablePlayerState.map { it.currentSong }
     }.collectAsState(initial = null)
 
-    // 3) Observe shuffle state for sync
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
     val isShuffleEnabled = stablePlayerState.isShuffleEnabled
 
-    // Padding inferior si hay canción en reproducción
     val bottomPadding = if (currentSong != null) MiniPlayerHeight else 0.dp
 
     var showOptionsBottomSheet by remember { mutableStateOf(false) }
@@ -138,11 +135,20 @@ fun HomeScreen(
     val sheetState = rememberModalBottomSheetState()
     val betaSheetState = rememberModalBottomSheetState()
     val scope = rememberCoroutineScope()
-    LocalContext.current
 
     val weeklyStats by statsViewModel.weeklyOverview.collectAsState()
 
-    // Drawer state for sidebar
+    // Recently-played proxy: top songs from this week, fallback to yourMixSongs.
+    val recentlyPlayed: ImmutableList<Song> = remember(weeklyStats, yourMixSongs, allSongs) {
+        val statTopIds = weeklyStats?.topSongs?.map { it.songId }.orEmpty()
+        val byStats = if (statTopIds.isNotEmpty()) {
+            val byId = (allSongs + yourMixSongs).distinctBy { it.id }.associateBy { it.id }
+            statTopIds.mapNotNull { byId[it] }
+        } else emptyList()
+        val combined = (byStats + yourMixSongs).distinctBy { it.id }.take(6)
+        combined.toImmutableList()
+    }
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     Box(
@@ -161,9 +167,7 @@ fun HomeScreen(
                     onBetaClick = {
                         showBetaInfoBottomSheet = true
                     },
-                    onMenuClick = {
-                        // onOpenSidebar() // Disabled
-                    }
+                    onMenuClick = { /* disabled */ }
                 )
             }
         ) { innerPadding ->
@@ -177,14 +181,26 @@ fun HomeScreen(
                     bottom = paddingValuesParent.calculateBottomPadding()
                             + 38.dp + bottomPadding
                 ),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                // Your Mix
-                item(key = "your_mix_header") {
-                    YourMixHeader(
-                        song = yourMixSong,
+                item(key = "greeting") {
+                    GreetingSection()
+                }
+
+                item(key = "featured_hero") {
+                    FeaturedHeroCard(
+                        songs = yourMixSongs,
                         isShuffleEnabled = isShuffleEnabled,
-                        onPlayShuffled = {
+                        onPlay = {
+                            if (yourMixSongs.isNotEmpty()) {
+                                playerViewModel.showAndPlaySong(
+                                    song = yourMixSongs.first(),
+                                    contextSongs = yourMixSongs,
+                                    queueName = "Your Mix"
+                                )
+                            }
+                        },
+                        onShuffle = {
                             if (yourMixSongs.isNotEmpty()) {
                                 playerViewModel.playSongsShuffled(
                                     songsToPlay = yourMixSongs,
@@ -195,22 +211,20 @@ fun HomeScreen(
                     )
                 }
 
-                // Collage
-                if (yourMixSongs.isNotEmpty()) {
-                    item(key = "album_art_collage") {
-                        AlbumArtCollage(
-                            modifier = Modifier.fillMaxWidth(),
-                            songs = yourMixSongs,
-                            padding = 14.dp,
-                            height = 400.dp,
+                if (recentlyPlayed.isNotEmpty()) {
+                    item(key = "recently_played") {
+                        RecentlyPlayedSection(
+                            songs = recentlyPlayed,
                             onSongClick = { song ->
-                                playerViewModel.showAndPlaySong(song, yourMixSongs, "Your Mix")
+                                playerViewModel.showAndPlaySong(song, recentlyPlayed, "Recently played")
+                            },
+                            onSeeAll = {
+                                navController.navigate(Screen.Stats.route)
                             }
                         )
                     }
                 }
 
-                // Daily Mix
                 if (dailyMixSongs.isNotEmpty()) {
                     item(key = "daily_mix_section") {
                         DailyMixSection(
@@ -246,9 +260,7 @@ fun HomeScreen(
                         )
                     )
                 )
-        ) {
-
-        }
+        )
     }
     if (showOptionsBottomSheet) {
         ModalBottomSheet(
@@ -257,9 +269,7 @@ fun HomeScreen(
         ) {
             HomeOptionsBottomSheet(
                 onNavigateToMashup = {
-                    scope.launch {
-                        sheetState.hide()
-                    }.invokeOnCompletion {
+                    scope.launch { sheetState.hide() }.invokeOnCompletion {
                         if (!sheetState.isVisible) {
                             showOptionsBottomSheet = false
                             navController.navigate(Screen.DJSpace.route)
@@ -287,73 +297,266 @@ fun HomeScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun YourMixHeader(
-    song: String,
-    isShuffleEnabled: Boolean = false,
-    onPlayShuffled: () -> Unit
-) {
-    val buttonCorners = 68.dp
-    val colors = MaterialTheme.colorScheme
-
-    Box(
+private fun GreetingSection() {
+    val hour = remember {
+        Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    }
+    val greeting = when (hour) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        in 17..21 -> "Good evening"
+        else -> "Good night"
+    }
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(256.dp)
-            .padding(16.dp)
+            .padding(horizontal = 24.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(top = 48.dp, start = 12.dp)
-        ) {
-            // Your Mix Title
-            Text(
-                text = "Your\nMix",
-                style = ExpTitleTypography.displayLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-            )
+        Text(
+            text = greeting,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+        )
+        Text(
+            text = "Welcome back",
+            style = ExpTitleTypography.displaySmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
 
-            // Artist/Song subtitle
-            Text(
-                text = song,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                modifier = Modifier.padding(start = 8.dp)
-            )
-        }
-        // Play Button - color changes based on shuffle state
-        LargeExtendedFloatingActionButton(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 12.dp),
-            onClick = onPlayShuffled,
-            containerColor = if (isShuffleEnabled) colors.primary else colors.tertiaryContainer,
-            contentColor = if (isShuffleEnabled) colors.onPrimary else colors.onTertiaryContainer,
-            shape = AbsoluteSmoothCornerShape(
-                cornerRadiusTL = buttonCorners,
-                smoothnessAsPercentTR = 60,
-                cornerRadiusBR = buttonCorners,
-                smoothnessAsPercentTL = 60,
-                cornerRadiusBL = buttonCorners,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusTR = buttonCorners,
-                smoothnessAsPercentBL = 60,
-            )
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.rounded_shuffle_24),
-                contentDescription = "Shuffle Play",
-                modifier = Modifier.size(36.dp)
-            )
+@Composable
+private fun FeaturedHeroCard(
+    songs: ImmutableList<Song>,
+    isShuffleEnabled: Boolean,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val heroArtUri = songs.firstOrNull()?.albumArtUriString
+    val trackCount = songs.size
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .height(280.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.primaryContainer),
+        elevation = CardDefaults.cardElevation(0.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Decorative blurred sphere using the first song's artwork.
+            if (heroArtUri != null) {
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val sphereSize = maxWidth * 0.85f
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .offset(x = sphereSize * 0.30f, y = (-12).dp)
+                            .size(sphereSize)
+                            .clip(CircleShape)
+                            .blur(28.dp)
+                    ) {
+                        SmartImage(
+                            model = heroArtUri,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            shape = CircleShape,
+                            contentScale = ContentScale.Crop,
+                            targetSize = coil.size.Size(900, 900)
+                        )
+                    }
+                    // Soft gradient overlay so the title remains legible over the sphere.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                brush = Brush.horizontalGradient(
+                                    0.0f to colors.primaryContainer,
+                                    0.55f to colors.primaryContainer.copy(alpha = 0.55f),
+                                    1.0f to Color.Transparent
+                                )
+                            )
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = "FEATURED · DAILY MIX",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onPrimaryContainer.copy(alpha = 0.75f),
+                        letterSpacing = 1.5.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Your\nMix",
+                        style = ExpTitleTypography.displayLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onPrimaryContainer,
+                        lineHeight = 56.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    val subtitle = if (trackCount > 0) {
+                        "$trackCount tracks · refreshed today"
+                    } else {
+                        "Refreshed today"
+                    }
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onPrimaryContainer.copy(alpha = 0.75f)
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        onClick = onPlay,
+                        shape = CircleShape,
+                        color = colors.onPrimaryContainer,
+                        contentColor = colors.primaryContainer
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Text(
+                                text = "Play",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onShuffle,
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = colors.onPrimaryContainer.copy(alpha = 0.18f),
+                            contentColor = colors.onPrimaryContainer
+                        ),
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.rounded_shuffle_24),
+                            contentDescription = "Shuffle",
+                            tint = if (isShuffleEnabled) colors.tertiary else colors.onPrimaryContainer
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
+@Composable
+private fun RecentlyPlayedSection(
+    songs: ImmutableList<Song>,
+    onSongClick: (Song) -> Unit,
+    onSeeAll: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Recently played",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            TextButton(onClick = onSeeAll) {
+                Text(
+                    text = "See all",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(items = songs, key = { it.id }) { song ->
+                RecentlyPlayedTile(
+                    song = song,
+                    onClick = { onSongClick(song) }
+                )
+            }
+        }
+    }
+}
 
-// SongListItem (modificado para aceptar parámetros individuales)
+@Composable
+private fun RecentlyPlayedTile(
+    song: Song,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(140.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(140.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+        ) {
+            SmartImage(
+                model = song.albumArtUriString,
+                contentDescription = "Album art for ${song.title}",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                shape = RoundedCornerShape(20.dp),
+                targetSize = coil.size.Size(420, 420)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = song.title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+        Text(
+            text = song.displayArtist,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+    }
+}
+
+// SongListItem retained for callers in the rest of the app.
 @Composable
 fun SongListItemFavs(
     modifier: Modifier = Modifier,
@@ -385,8 +588,7 @@ fun SongListItemFavs(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
-                modifier = Modifier
-                    .weight(0.9f),
+                modifier = Modifier.weight(0.9f),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 SmartImage(
@@ -397,7 +599,7 @@ fun SongListItemFavs(
                     modifier = Modifier.size(48.dp)
                 )
                 Spacer(Modifier.width(16.dp))
-                Column(modifier = Modifier) {
+                Column {
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleMedium,
@@ -406,7 +608,8 @@ fun SongListItemFavs(
                         maxLines = 1, overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = artist, style = MaterialTheme.typography.bodyMedium,
+                        text = artist,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = contentColor.copy(alpha = 0.7f),
                         maxLines = 1, overflow = TextOverflow.Ellipsis
                     )
@@ -418,9 +621,9 @@ fun SongListItemFavs(
                     modifier = Modifier
                         .weight(0.1f)
                         .padding(start = 8.dp)
-                        .size(width = 18.dp, height = 16.dp), // similar al tamaño del ícono
+                        .size(width = 18.dp, height = 16.dp),
                     color = colors.primary,
-                    isPlaying = isPlaying  // o conectalo a tu estado real de reproducción
+                    isPlaying = isPlaying
                 )
             }
         }
@@ -436,15 +639,7 @@ fun SongListItemFavsWrapper(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Collect the stablePlayerState once
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
-
-    // Derive isThisSongPlaying using remember
-    val isThisSongPlaying = remember(song.id, stablePlayerState.currentSong?.id, stablePlayerState.isPlaying) {
-        song.id == stablePlayerState.currentSong?.id
-    }
-
-    // Call the presentational composable
     SongListItemFavs(
         modifier = modifier,
         cardCorners = 0.dp,
