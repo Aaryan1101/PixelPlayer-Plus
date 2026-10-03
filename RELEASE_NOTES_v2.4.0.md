@@ -1,4 +1,4 @@
-# PixelPlayer Plus v2.3.0
+# PixelPlayer Plus v2.4.0
 
 PixelPlayer now includes a dedicated Linux desktop application alongside the Android player.
 
@@ -24,8 +24,8 @@ The Linux archive is portable and includes its Java runtime. `mpv` must be insta
 
 ## Downloads
 
-- `PixelPlayer-Android-v2.3.0.apk` — Android application
-- `PixelPlayer-Desktop-v2.3.0-linux-x64.tar.gz` — Linux x86-64 desktop application
+- `PixelPlayer-Android-v2.4.0.apk` — Android application
+- `PixelPlayer-Desktop-v2.4.0-linux-x64.tar.gz` — Linux x86-64 desktop application
 
 The Android APK is v2-signed with the repository's existing debug certificate. It is intended for
 direct installation and updates that use the same signing certificate, not Play Store publication.
