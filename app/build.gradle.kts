@@ -31,7 +31,7 @@ android {
 
     defaultConfig {
         applicationId = "com.theveloper.pixelplay"
-        minSdk = 29
+        minSdk = 28
         targetSdk = 35
         versionCode = (project.findProperty("APP_VERSION_CODE") as String).toInt()
         versionName = project.findProperty("APP_VERSION_NAME") as String
@@ -305,7 +305,7 @@ dependencies {
     implementation(libs.androidx.app.projected)
 
     // NewPipe Extractor for YouTube audio extraction
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1")
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
 
 }
 

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=PixelPlayer
+GenericName=Music Player
+Comment=A focused desktop music player
+Exec=/home/potato/.local/opt/pixelplayer-desktop/bin/pixelplayer-desktop
+Icon=pixelplayer-desktop
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;audio;player;playlist;
+StartupNotify=true
+StartupWMClass=pixelplayer-desktop
