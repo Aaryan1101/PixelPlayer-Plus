@@ -116,6 +116,9 @@ class TransitionController @Inject constructor(
         transitionSchedulerJob?.cancel()
 
         transitionSchedulerJob = scope.launch {
+            // Coalesce rapid skips/timeline churn before touching the auxiliary player.
+            delay(150)
+
             // WAIT for any active transition to finish.
             // If we proceed immediately, we might call prepareNext() which resets playerB.
             // But during a crossfade, playerB is the "Outgoing Player", so resetting it kills the fade.
@@ -144,8 +147,6 @@ class TransitionController @Inject constructor(
             }
 
             val targetIndex = if (repeatMode == Player.REPEAT_MODE_ONE) player.currentMediaItemIndex else nextIndex
-            Timber.tag("TransitionDebug").d("Preparing next track: %s (Index: %d)", nextMediaItem.mediaId, targetIndex)
-            engine.prepareNext(nextMediaItem)
 
             val playlistId = currentMediaItem.mediaMetadata.extras?.getString("playlistId")
             val fromTrackId = currentMediaItem.mediaId
@@ -180,21 +181,25 @@ class TransitionController @Inject constructor(
                     settings.mode, settings.durationMs, isEnabled, resolution.source
                 )
 
-                val isGloballyDisabled = resolution.source == TransitionSource.GLOBAL_DEFAULT && !isEnabled
-
-                // If globally disabled and we are using the global defaults, use no transition.
-                if (isGloballyDisabled) {
-                    Timber.tag("TransitionDebug").d("Crossfade globally disabled. Using default gap.")
-                    engine.setPauseAtEndOfMediaItems(false)
+                if (!isEnabled) {
+                    Timber.tag("TransitionDebug").d("Crossfade globally disabled. Skipping auxiliary preparation.")
+                    engine.cancelNext()
                     return@collectLatest
                 }
 
                 // If transition is disabled or has no duration, do nothing.
                 if (settings.mode == TransitionMode.NONE || settings.durationMs <= 0) {
                     Timber.tag("TransitionDebug").d("Transition disabled or zero duration.")
-                    engine.setPauseAtEndOfMediaItems(false)
+                    engine.cancelNext()
                     return@collectLatest
                 }
+
+                Timber.tag("TransitionDebug").d(
+                    "Preparing next track after settings validation: %s (Index: %d)",
+                    nextMediaItem.mediaId,
+                    targetIndex
+                )
+                engine.prepareNext(nextMediaItem)
 
                 // Wait for the player to report a valid duration.
                 var duration = player.duration

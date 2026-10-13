@@ -45,7 +45,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,6 +93,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.media3.common.util.UnstableApi
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.repository.MusicRepository
@@ -101,7 +101,7 @@ import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.NavBarContentHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistBottomSheet
 import com.theveloper.pixelplay.presentation.navigation.Screen // Required for Screen.GenreDetail.createRoute
-import com.theveloper.pixelplay.presentation.screens.search.components.GenreCategoriesGrid
+import com.theveloper.pixelplay.presentation.screens.search.components.OnlineExploreGrid
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.first
@@ -121,31 +121,49 @@ fun SearchScreen(
     onSearchBarActiveChange: (Boolean) -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var exploreSearchQuery by remember { mutableStateOf<String?>(null) }
     var active by remember { mutableStateOf(false) }
     val systemNavBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val bottomBarHeightDp = NavBarContentHeight + systemNavBarInset
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
-    val uiState by playerViewModel.playerUiState.collectAsState()
-    val currentFilter by remember { derivedStateOf { uiState.selectedSearchFilter } }
-    val searchMode = uiState.searchMode
-    val searchHistory = uiState.searchHistory
-    val isSearchLoading = uiState.isSearchLoading && uiState.activeSearchQuery == searchQuery.trim()
-    // Keep genres collection as it's needed for GenreCategoriesGrid
-    val genres by playerViewModel.genres.collectAsState()
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
-    val favoriteSongIds by playerViewModel.favoriteSongIds.collectAsState()
+    val uiState by playerViewModel.searchUiState.collectAsStateWithLifecycle()
+    val currentFilter = uiState.selectedFilter
+    val searchMode = uiState.mode
+    val searchHistory = uiState.history
+    val isSearchLoading = uiState.isLoading && uiState.activeQuery == searchQuery.trim()
+    val pendingExploreSearch by playerViewModel.pendingExploreSearch.collectAsStateWithLifecycle()
+    val playbackIndicator by playerViewModel.playbackIndicatorUiState.collectAsStateWithLifecycle()
+    val favoriteSongIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     var selectedSongForInfo by remember { mutableStateOf<Song?>(null) }
 
+    LaunchedEffect(pendingExploreSearch) {
+        pendingExploreSearch?.let { request ->
+            playerViewModel.updateSearchFilter(SearchFilterType.SONGS)
+            exploreSearchQuery = request.query
+            searchQuery = request.title
+            active = false
+            playerViewModel.consumeExploreSearch()
+        }
+    }
+
     // Perform search whenever searchQuery, active state, or filter changes
-    LaunchedEffect(searchQuery, active, currentFilter) {
+    LaunchedEffect(searchQuery, active, currentFilter, exploreSearchQuery) {
         if (searchQuery.isNotBlank()) {
-            playerViewModel.performSearch(searchQuery)
+            val categoryQuery = exploreSearchQuery
+            if (categoryQuery != null) {
+                playerViewModel.performOnlineSearch(
+                    query = categoryQuery,
+                    displayQuery = searchQuery
+                )
+            } else {
+                playerViewModel.performSearch(searchQuery)
+            }
         } else if (active) {
             playerViewModel.performSearch("")
         }
     }
-    val searchResults = uiState.searchResults
+    val searchResults = uiState.results
     val handleSongMoreOptionsClick: (Song) -> Unit = { song ->
         selectedSongForInfo = song
         playerViewModel.selectSongForInfo(song)
@@ -215,7 +233,10 @@ fun SearchScreen(
             ) {
                 SearchBar(
                     query = searchQuery,
-                    onQueryChange = { searchQuery = it },
+                    onQueryChange = {
+                        exploreSearchQuery = null
+                        searchQuery = it
+                    },
                     onSearch = {
                         if (searchQuery.isNotBlank()) {
                             playerViewModel.onSearchQuerySubmitted(searchQuery)
@@ -253,7 +274,10 @@ fun SearchScreen(
                     trailingIcon = {
                         if (searchQuery.isNotBlank()) {
                             IconButton(
-                                onClick = { searchQuery = "" },
+                                onClick = {
+                                    exploreSearchQuery = null
+                                    searchQuery = ""
+                                },
                                 modifier = Modifier
                                     .size(48.dp)
                                     .padding(end = 10.dp)
@@ -341,8 +365,9 @@ fun SearchScreen(
                                     results = searchResults,
                                     playerViewModel = playerViewModel,
                                     onItemSelected = rememberedOnItemSelected,
-                                    currentPlayingSongId = stablePlayerState.currentSong?.id,
-                                    isPlaying = stablePlayerState.isPlaying,
+                                    currentPlayingSongId = playbackIndicator.currentSongId,
+                                    isPlaying = playbackIndicator.isPlaying,
+                                    isShuffleEnabled = playbackIndicator.isShuffleEnabled,
                                     onSongMoreOptionsClick = handleSongMoreOptionsClick,
                                     navController = navController
                                 )
@@ -365,15 +390,13 @@ fun SearchScreen(
             if (!active) {
                 if (searchQuery.isBlank()) {
                     Box {
-                        GenreCategoriesGrid(
-                            genres = genres,
-                            onGenreClick = { genre ->
-                                Timber.tag("SearchScreen")
-                                    .d("Genre clicked: ${genre.name} (ID: ${genre.id})")
-                                val encodedGenreId = java.net.URLEncoder.encode(genre.id, "UTF-8")
-                                navController.navigate(Screen.GenreDetail.createRoute(encodedGenreId))
+                        OnlineExploreGrid(
+                            onCategoryClick = { category ->
+                                playerViewModel.updateSearchFilter(SearchFilterType.SONGS)
+                                exploreSearchQuery = category.searchQuery
+                                searchQuery = category.title
+                                active = false
                             },
-                            playerViewModel = playerViewModel,
                             modifier = Modifier.padding(top = 12.dp)
                         )
                         Box(
@@ -422,8 +445,9 @@ fun SearchScreen(
                                 results = searchResults,
                                 playerViewModel = playerViewModel,
                                 onItemSelected = { },
-                                currentPlayingSongId = stablePlayerState.currentSong?.id,
-                                isPlaying = stablePlayerState.isPlaying,
+                                currentPlayingSongId = playbackIndicator.currentSongId,
+                                isPlaying = playbackIndicator.isPlaying,
+                                isShuffleEnabled = playbackIndicator.isShuffleEnabled,
                                 onSongMoreOptionsClick = handleSongMoreOptionsClick,
                                 navController = navController
                             )
@@ -505,7 +529,7 @@ fun SearchScreen(
                 hasDownloadError = playerViewModel.getDownloadState(currentSong.id).error != null
             )
             if (showPlaylistBottomSheet) {
-                val playlistUiState by playlistViewModel.uiState.collectAsState()
+                val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
 
                 PlaylistBottomSheet(
                     playlistUiState = playlistUiState,
@@ -681,11 +705,11 @@ fun SearchResultsList(
     onItemSelected: () -> Unit,
     currentPlayingSongId: String?,
     isPlaying: Boolean,
+    isShuffleEnabled: Boolean,
     onSongMoreOptionsClick: (Song) -> Unit,
     navController: NavHostController
 ) {
     val localDensity = LocalDensity.current
-    val playerStableState by playerViewModel.stablePlayerState.collectAsState()
 
     if (results.isEmpty()) {
         Box(
@@ -826,7 +850,12 @@ fun SearchResultsList(
                                 LaunchedEffect(fetchSongs) {
                                     songsInPlaylist = playerViewModel.getSongs( item.playlist.songIds)
                                 }
-                                val onPlayClick = remember(item.playlist, playerViewModel, onItemSelected) {
+                                val onPlayClick = remember(
+                                    item.playlist,
+                                    playerViewModel,
+                                    onItemSelected,
+                                    isShuffleEnabled
+                                ) {
                                     {
                                         fetchSongs = true
                                         if (songsInPlaylist.isNotEmpty()) {
@@ -835,7 +864,7 @@ fun SearchResultsList(
                                                 songsInPlaylist.first(),
                                                 item.playlist.name
                                             )
-                                            if (playerStableState.isShuffleEnabled) playerViewModel.toggleShuffle()
+                                            if (isShuffleEnabled) playerViewModel.toggleShuffle()
                                         } else
                                             playerViewModel.sendToast("Empty playlist")
                                         onItemSelected()

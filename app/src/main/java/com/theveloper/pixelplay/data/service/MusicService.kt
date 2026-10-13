@@ -3,6 +3,7 @@ package com.theveloper.pixelplay.data.service
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -50,10 +51,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.runBlocking
 import timber.log.Timber
 import java.io.ByteArrayOutputStream
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
@@ -305,7 +304,7 @@ class MusicService : MediaSessionService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = mediaSession?.player
-        val allowBackground = runBlocking { userPreferencesRepository.keepPlayingInBackgroundFlow.first() }
+        val allowBackground = keepPlayingInBackground
 
         if (!allowBackground) {
             player?.apply {
@@ -336,6 +335,13 @@ class MusicService : MediaSessionService() {
         controller.release()
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            widgetArtByteArrayCache.evictAll()
+        }
     }
 
     private fun getOpenAppPendingIntent(): PendingIntent {

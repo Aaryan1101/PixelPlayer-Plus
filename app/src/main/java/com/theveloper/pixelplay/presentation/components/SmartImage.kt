@@ -1,21 +1,17 @@
 package com.theveloper.pixelplay.presentation.components
 
 import android.graphics.Bitmap
-import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
@@ -23,19 +19,15 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.Alignment
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Size // Import Coil's Size
-import coil.compose.SubcomposeAsyncImage
-import coil.compose.SubcomposeAsyncImageContent
 import com.theveloper.pixelplay.R
 
 @Composable
@@ -58,117 +50,67 @@ fun SmartImage(
 ) {
     val context = LocalContext.current
     val clippedModifier = modifier.clip(shape)
+    var resolvedModel by remember(model) { mutableStateOf(model) }
 
-    @Suppress("NAME_SHADOWING")
-    val model = when (model) {
+    val displayModel = when (val candidate = resolvedModel) {
         is ImageRequest -> handleDirectModel(
-            data = model.data,
+            data = candidate.data,
             modifier = clippedModifier,
             contentDescription = contentDescription,
             contentScale = contentScale,
             colorFilter = colorFilter,
             alpha = alpha
-        ) ?: model
+        ) ?: candidate
         else -> handleDirectModel(
-            data = model,
+            data = candidate,
             modifier = clippedModifier,
             contentDescription = contentDescription,
             contentScale = contentScale,
             colorFilter = colorFilter,
             alpha = alpha
-        ) ?: model
+        ) ?: candidate
     }
 
-    if (model is ImageVector || model is Painter || model is ImageBitmap || model is Bitmap) {
+    if (displayModel is ImageVector || displayModel is Painter || displayModel is ImageBitmap || displayModel is Bitmap) {
         // Already rendered inside handleDirectModel.
         return
     }
 
-    val request = when (model) {
-        is ImageRequest -> model
+    val request = when (displayModel) {
+        is ImageRequest -> displayModel
         else -> ImageRequest.Builder(context)
-            .data(model)
+            .data(displayModel)
             .crossfade(crossfadeDurationMillis)
             .diskCachePolicy(if (useDiskCache) CachePolicy.ENABLED else CachePolicy.DISABLED)
             .memoryCachePolicy(if (useMemoryCache) CachePolicy.ENABLED else CachePolicy.DISABLED)
             .allowHardware(allowHardware)
-            .memoryCacheKey(model?.toString()?.plus("_${targetSize.width}x${targetSize.height}"))
-            .diskCacheKey(model?.toString()?.plus("_${targetSize.width}x${targetSize.height}"))
+            .memoryCacheKey(displayModel?.toString()?.plus("_${targetSize.width}x${targetSize.height}"))
+            .diskCacheKey(displayModel?.toString()?.plus("_${targetSize.width}x${targetSize.height}"))
             .apply {
                 size(targetSize)
             }
             .build()
     }
 
-    SubcomposeAsyncImage(
-        model = request,
-        contentDescription = contentDescription,
-        modifier = clippedModifier,
-        contentScale = contentScale,
-        colorFilter = colorFilter,
-        alpha = alpha
+    Box(
+        modifier = clippedModifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
-        val state = painter.state
-
-        LaunchedEffect(state) {
-            onState?.invoke(state)
-        }
-
-        var lastSuccessPainter by remember { mutableStateOf<Painter?>(null) }
-
-        when (state) {
-            is AsyncImagePainter.State.Success -> {
-                lastSuccessPainter = state.painter
-                SubcomposeAsyncImageContent()
+        AsyncImage(
+            model = request,
+            contentDescription = contentDescription,
+            modifier = Modifier.fillMaxSize(),
+            placeholder = painterResource(placeholderResId),
+            error = painterResource(errorResId),
+            contentScale = contentScale,
+            colorFilter = colorFilter,
+            alpha = alpha,
+            onLoading = { state -> onState?.invoke(state) },
+            onSuccess = { state -> onState?.invoke(state) },
+            onError = { state ->
+                youtubeThumbnailFallback(resolvedModel)?.let { resolvedModel = it }
+                onState?.invoke(state)
             }
-            AsyncImagePainter.State.Empty,
-            is AsyncImagePainter.State.Loading -> {
-                val cachedPainter = lastSuccessPainter
-                if (cachedPainter != null) {
-                    Image(
-                        painter = cachedPainter,
-                        contentDescription = contentDescription,
-                        modifier = Modifier
-                            .fillMaxSize(),
-                        contentScale = contentScale,
-                        colorFilter = colorFilter,
-                        alpha = alpha
-                    )
-                } else {
-                    Placeholder(
-                        modifier = Modifier.fillMaxSize(),
-                        drawableResId = placeholderResId,
-                        contentDescription = contentDescription,
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        alpha = alpha
-                    )
-                }
-            }
-            is AsyncImagePainter.State.Error -> {
-                val cachedPainter = lastSuccessPainter
-                if (cachedPainter != null) {
-                    Image(
-                        painter = cachedPainter,
-                        contentDescription = contentDescription,
-                        modifier = Modifier
-                            .fillMaxSize(),
-                        contentScale = contentScale,
-                        colorFilter = colorFilter,
-                        alpha = alpha
-                    )
-                } else {
-                    Placeholder(
-                        modifier = Modifier.fillMaxSize(),
-                        drawableResId = errorResId,
-                        contentDescription = contentDescription,
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        alpha = alpha
-                    )
-                }
-            }
-        }
+        )
     }
 }
 
@@ -230,27 +172,8 @@ private fun handleDirectModel(
     }
 }
 
-@Composable
-private fun Placeholder(
-    modifier: Modifier,
-    @DrawableRes drawableResId: Int,
-    contentDescription: String?,
-    containerColor: Color,
-    iconColor: Color,
-    alpha: Float,
-) {
-    Box(
-        modifier = modifier
-            .alpha(alpha)
-            .background(containerColor),
-        contentAlignment = Alignment.Center
-    ) {
-        Image(
-            painter = painterResource(drawableResId),
-            contentDescription = contentDescription,
-            colorFilter = ColorFilter.tint(iconColor),
-            modifier = Modifier.size(32.dp),
-            contentScale = ContentScale.Fit
-        )
-    }
+private fun youtubeThumbnailFallback(model: Any?): String? {
+    val url = model as? String ?: return null
+    if ("i.ytimg.com/vi/" !in url || !url.endsWith("/maxresdefault.jpg")) return null
+    return url.removeSuffix("/maxresdefault.jpg") + "/hqdefault.jpg"
 }

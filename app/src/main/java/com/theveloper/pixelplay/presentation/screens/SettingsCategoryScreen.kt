@@ -51,7 +51,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,6 +71,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -105,20 +105,20 @@ fun SettingsCategoryScreen(
     val context = LocalContext.current
     
     // State Collection (Duplicated from SettingsScreen for now to ensure functionality)
-    val uiState by settingsViewModel.uiState.collectAsState()
-    val geminiApiKey by settingsViewModel.geminiApiKey.collectAsState()
-    val pipedInstanceUrl by settingsViewModel.pipedInstanceUrl.collectAsState()
-    val geminiModel by settingsViewModel.geminiModel.collectAsState()
-    val geminiSystemPrompt by settingsViewModel.geminiSystemPrompt.collectAsState()
-    val currentPath by settingsViewModel.currentPath.collectAsState()
-    val directoryChildren by settingsViewModel.currentDirectoryChildren.collectAsState()
-    val availableStorages by settingsViewModel.availableStorages.collectAsState()
-    val selectedStorageIndex by settingsViewModel.selectedStorageIndex.collectAsState()
-    val isLoadingDirectories by settingsViewModel.isLoadingDirectories.collectAsState()
-    val isExplorerPriming by settingsViewModel.isExplorerPriming.collectAsState()
-    val isExplorerReady by settingsViewModel.isExplorerReady.collectAsState()
-    val isSyncing by settingsViewModel.isSyncing.collectAsState()
-    val syncProgress by settingsViewModel.syncProgress.collectAsState()
+    val uiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    val geminiApiKey by settingsViewModel.geminiApiKey.collectAsStateWithLifecycle()
+    val pipedInstanceUrl by settingsViewModel.pipedInstanceUrl.collectAsStateWithLifecycle()
+    val geminiModel by settingsViewModel.geminiModel.collectAsStateWithLifecycle()
+    val geminiSystemPrompt by settingsViewModel.geminiSystemPrompt.collectAsStateWithLifecycle()
+    val currentPath by settingsViewModel.currentPath.collectAsStateWithLifecycle()
+    val directoryChildren by settingsViewModel.currentDirectoryChildren.collectAsStateWithLifecycle()
+    val availableStorages by settingsViewModel.availableStorages.collectAsStateWithLifecycle()
+    val selectedStorageIndex by settingsViewModel.selectedStorageIndex.collectAsStateWithLifecycle()
+    val isLoadingDirectories by settingsViewModel.isLoadingDirectories.collectAsStateWithLifecycle()
+    val isExplorerPriming by settingsViewModel.isExplorerPriming.collectAsStateWithLifecycle()
+    val isExplorerReady by settingsViewModel.isExplorerReady.collectAsStateWithLifecycle()
+    val isSyncing by settingsViewModel.isSyncing.collectAsStateWithLifecycle()
+    val syncProgress by settingsViewModel.syncProgress.collectAsStateWithLifecycle()
     val explorerRoot = settingsViewModel.explorerRoot()
 
     // Local State
@@ -311,7 +311,7 @@ fun SettingsCategoryScreen(
                                 description = "Choose the appearance for the floating player.",
                                 options = mapOf(
                                     ThemePreference.ALBUM_ART to "Album Art",
-                                    ThemePreference.DYNAMIC to "System Dynamic"
+                                    ThemePreference.DYNAMIC to "PixelPlayer Purple"
                                 ),
                                 selectedKey = uiState.playerThemePreference,
                                 onSelectionChanged = { settingsViewModel.setPlayerThemePreference(it) },

@@ -81,10 +81,13 @@ object YouTubeToSongMapper {
         // Convert duration from seconds to milliseconds
         val durationMs = videoItem.duration * 1000L
         
-        // Get the highest quality thumbnail
-        val thumbnailUrl = videoItem.thumbnails
-            .maxByOrNull { it.height }
-            ?.url ?: ""
+        // Request max-resolution artwork first. SmartImage retries hqdefault
+        // automatically for videos that do not publish a maxres thumbnail.
+        val thumbnailUrl = if (videoId != "unknown") {
+            "https://i.ytimg.com/vi/$videoId/maxresdefault.jpg"
+        } else {
+            videoItem.thumbnails.maxByOrNull { it.height }?.url.orEmpty()
+        }
         
         return Song(
             id = songId,

@@ -72,7 +72,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -99,6 +98,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.HapticFeedbackConstantsCompat
 import androidx.core.view.ViewCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import coil.size.Size
@@ -141,9 +141,9 @@ fun PlaylistDetailScreen(
     playlistViewModel: PlaylistViewModel = hiltViewModel(),
     navController: NavController
 ) {
-    val uiState by playlistViewModel.uiState.collectAsState()
-    val playerStableState by playerViewModel.stablePlayerState.collectAsState()
-    val playerSheetState by playerViewModel.sheetState.collectAsState()
+    val uiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
+    val playbackIndicator by playerViewModel.playbackIndicatorUiState.collectAsStateWithLifecycle()
+    val playerSheetState by playerViewModel.sheetState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val currentPlaylist = uiState.currentPlaylistDetails
     val isFolderPlaylist = currentPlaylist?.id?.startsWith(FOLDER_PLAYLIST_PREFIX) == true
@@ -176,8 +176,8 @@ fun PlaylistDetailScreen(
         }
     }
 
-    val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsState()
-    val favoriteIds by playerViewModel.favoriteSongIds.collectAsState() // Reintroducir favoriteIds aquí
+    val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
+    val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val stableOnMoreOptionsClick: (Song) -> Unit = remember {
         { song ->
             playerViewModel.selectSongForInfo(song)
@@ -333,7 +333,7 @@ fun PlaylistDetailScreen(
                                     localReorderableSongs.first(),
                                     currentPlaylist.name
                                 )
-                                if (playerStableState.isShuffleEnabled) playerViewModel.toggleShuffle()
+                                if (playbackIndicator.isShuffleEnabled) playerViewModel.toggleShuffle()
                             }
                         },
                         modifier = Modifier
@@ -580,8 +580,8 @@ fun PlaylistDetailScreen(
                                         )
                                     },
                                     song = song,
-                                    isCurrentSong = playerStableState.currentSong?.id == song.id,
-                                    isPlaying = playerStableState.isPlaying,
+                                    isCurrentSong = playbackIndicator.currentSongId == song.id,
+                                    isPlaying = playbackIndicator.isPlaying,
                                     isDragging = isDragging,
                                     onRemoveClick = {
                                         if (!isFolderPlaylist) {
@@ -856,7 +856,7 @@ fun PlaylistDetailScreen(
                 hasDownloadError = playerViewModel.getDownloadState(currentSong.id).error != null
             )
             if (showPlaylistBottomSheet) {
-                val playlistUiState by playlistViewModel.uiState.collectAsState()
+                val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
 
                 PlaylistBottomSheet(
                     playlistUiState = playlistUiState,
@@ -872,7 +872,7 @@ fun PlaylistDetailScreen(
         }
     }
 
-    val isSortSheetVisible by playerViewModel.isSortingSheetVisible.collectAsState()
+    val isSortSheetVisible by playerViewModel.isSortingSheetVisible.collectAsStateWithLifecycle()
 
     if (isSortSheetVisible) {
         // Check if playlist is in Manual mode (which corresponds to Default Order)

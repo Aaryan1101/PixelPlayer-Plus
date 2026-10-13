@@ -58,11 +58,11 @@ fun AlbumCarouselSection(
     )
 
     PrefetchAlbumNeighbors(
-        isActive = expansionFraction > 0.08f,
+        isActive = expansionFraction > 0.85f,
         pagerState = carouselState.pagerState,
         queue = queue,
         radius = 1,
-        targetSize = Size(1200, 1200)
+        targetSize = Size(768, 768)
     )
 
     // Player -> Carousel
@@ -122,7 +122,7 @@ fun AlbumCarouselSection(
                         uri = song.albumArtUriString,
                         title = song.title,
                         modifier = Modifier.fillMaxSize(),
-                        targetSize = Size(1200, 1200)
+                        targetSize = Size(768, 768)
                     )
                 }
             }

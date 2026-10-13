@@ -44,7 +44,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 // Removed TopAppBar and TopAppBarDefaults as GradientTopBar will be used
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayDarkTheme
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavHostController
 import com.theveloper.pixelplay.data.model.Song // Import Song
@@ -84,9 +84,9 @@ fun GenreDetailScreen(
     playerViewModel: PlayerViewModel,
     viewModel: GenreDetailViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val playerSheetState by playerViewModel.sheetState.collectAsState()
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val playerSheetState by playerViewModel.sheetState.collectAsStateWithLifecycle()
+    val hasCurrentSong by playerViewModel.hasCurrentSong.collectAsStateWithLifecycle()
 
     val darkMode = LocalPixelPlayDarkTheme.current
 
@@ -98,7 +98,7 @@ fun GenreDetailScreen(
         playerViewModel.collapsePlayerSheet()
     }
 
-    val isMiniPlayerVisible = stablePlayerState.isPlaying || stablePlayerState.currentSong != null
+    val isMiniPlayerVisible = hasCurrentSong
 
     val fabBottomPadding = animateDpAsState(
         targetValue = if (isMiniPlayerVisible) {

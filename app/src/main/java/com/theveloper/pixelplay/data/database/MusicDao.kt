@@ -10,6 +10,23 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import com.theveloper.pixelplay.utils.AudioMeta
 import kotlinx.coroutines.flow.Flow
 
+private val SONG_SEARCH_TOKEN_REGEX = Regex("""[\p{L}\p{N}]+""")
+private val CJK_SEARCH_CHARACTER_REGEX =
+    Regex("""[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]""")
+private const val EMPTY_SONG_SEARCH_MATCH_QUERY = "pixelplayeremptyquery*"
+
+private fun buildSongSearchMatchQuery(query: String): String {
+    val tokens = SONG_SEARCH_TOKEN_REGEX
+        .findAll(query)
+        .map { it.value }
+        .filter { it.isNotBlank() }
+        .take(6)
+        .toList()
+
+    if (tokens.isEmpty()) return EMPTY_SONG_SEARCH_MATCH_QUERY
+    return tokens.joinToString(separator = " AND ") { "$it*" }
+}
+
 @Dao
 interface MusicDao {
 
@@ -76,16 +93,16 @@ interface MusicDao {
                 deleteSongsByIds(chunk)
             }
         }
-        
+
         // Upsert artists, albums, and songs (REPLACE strategy handles updates)
         insertArtists(artists)
         insertAlbums(albums)
-        
+
         // Insert songs in chunks to allow concurrent reads
         songs.chunked(SONG_BATCH_SIZE).forEach { chunk ->
             insertSongs(chunk)
         }
-        
+
         // Delete old cross-refs for updated songs and insert new ones
         val updatedSongIds = songs.map { it.id }
         updatedSongIds.chunked(CROSS_REF_BATCH_SIZE).forEach { chunk ->
@@ -94,7 +111,7 @@ interface MusicDao {
         crossRefs.chunked(CROSS_REF_BATCH_SIZE).forEach { chunk ->
             insertSongArtistCrossRefs(chunk)
         }
-        
+
         // Clean up orphaned albums and artists
         deleteOrphanedAlbums()
         deleteOrphanedArtists()
@@ -136,17 +153,74 @@ interface MusicDao {
     @Query("SELECT * FROM songs WHERE artist_id = :artistId ORDER BY title ASC")
     fun getSongsByArtistId(artistId: Long): Flow<List<SongEntity>>
 
+    @Query("SELECT * FROM songs WHERE album_id IN (:albumIds)")
+    fun getSongsForAlbums(albumIds: List<Long>): Flow<List<SongEntity>>
+
+    @Query("""
+        SELECT songs.* FROM songs
+        WHERE songs.artist_id IN (:artistIds)
+        UNION
+        SELECT songs.* FROM songs
+        INNER JOIN song_artist_cross_ref
+            ON songs.id = song_artist_cross_ref.song_id
+        WHERE song_artist_cross_ref.artist_id IN (:artistIds)
+    """)
+    fun getSongsForArtists(artistIds: List<Long>): Flow<List<SongEntity>>
+
     @Query("""
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (title LIKE '%' || :query || '%' OR artist_name LIKE '%' || :query || '%')
         ORDER BY title ASC
+        LIMIT :limit
     """)
+    fun searchSongsLike(
+        query: String,
+        allowedParentDirs: List<String>,
+        applyDirectoryFilter: Boolean,
+        limit: Int
+    ): Flow<List<SongEntity>>
+
+    @Query("""
+        SELECT songs.* FROM songs
+        INNER JOIN songs_fts ON songs_fts.rowid = songs.id
+        WHERE (:applyDirectoryFilter = 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        AND songs_fts MATCH :matchQuery
+        ORDER BY
+            CASE
+                WHEN lower(songs.title) = lower(:rawQuery) THEN 0
+                WHEN lower(songs.title) LIKE lower(:rawQuery) || '%' THEN 1
+                ELSE 2
+            END,
+            songs.title ASC
+        LIMIT :limit
+    """)
+    fun searchSongsFts(
+        matchQuery: String,
+        rawQuery: String,
+        allowedParentDirs: List<String>,
+        applyDirectoryFilter: Boolean,
+        limit: Int
+    ): Flow<List<SongEntity>>
+
     fun searchSongs(
         query: String,
         allowedParentDirs: List<String>,
-        applyDirectoryFilter: Boolean
-    ): Flow<List<SongEntity>>
+        applyDirectoryFilter: Boolean,
+        limit: Int = 100
+    ): Flow<List<SongEntity>> {
+        return if (CJK_SEARCH_CHARACTER_REGEX.containsMatchIn(query)) {
+            searchSongsLike(query, allowedParentDirs, applyDirectoryFilter, limit)
+        } else {
+            searchSongsFts(
+                matchQuery = buildSongSearchMatchQuery(query),
+                rawQuery = query.trim(),
+                allowedParentDirs = allowedParentDirs,
+                applyDirectoryFilter = applyDirectoryFilter,
+                limit = limit
+            )
+        }
+    }
 
     @Query("SELECT COUNT(*) FROM songs")
     fun getSongCount(): Flow<Int>
@@ -202,11 +276,13 @@ interface MusicDao {
         WHERE (:applyDirectoryFilter = 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND (albums.title LIKE '%' || :query || '%' OR albums.artist_name LIKE '%' || :query || '%')
         ORDER BY albums.title ASC
+        LIMIT :limit
     """)
     fun searchAlbums(
         query: String,
         allowedParentDirs: List<String>,
-        applyDirectoryFilter: Boolean
+        applyDirectoryFilter: Boolean,
+        limit: Int
     ): Flow<List<AlbumEntity>>
 
     // --- Artist Queries ---
@@ -260,11 +336,13 @@ interface MusicDao {
         WHERE (:applyDirectoryFilter = 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND artists.name LIKE '%' || :query || '%'
         ORDER BY artists.name ASC
+        LIMIT :limit
     """)
     fun searchArtists(
         query: String,
         allowedParentDirs: List<String>,
-        applyDirectoryFilter: Boolean
+        applyDirectoryFilter: Boolean,
+        limit: Int
     ): Flow<List<ArtistEntity>>
 
     // --- Artist Image Operations ---
@@ -379,6 +457,20 @@ interface MusicDao {
     @Query("SELECT * FROM song_artist_cross_ref")
     fun getAllSongArtistCrossRefs(): Flow<List<SongArtistCrossRef>>
 
+    @Query("SELECT * FROM song_artist_cross_ref WHERE song_id IN (:songIds)")
+    fun getCrossRefsForSongs(songIds: List<Long>): Flow<List<SongArtistCrossRef>>
+
+    @Query("SELECT * FROM song_artist_cross_ref WHERE artist_id IN (:artistIds)")
+    fun getCrossRefsForArtists(artistIds: List<Long>): Flow<List<SongArtistCrossRef>>
+
+    @Query("""
+        SELECT DISTINCT artists.* FROM artists
+        INNER JOIN song_artist_cross_ref
+            ON artists.id = song_artist_cross_ref.artist_id
+        WHERE song_artist_cross_ref.song_id IN (:songIds)
+    """)
+    fun getArtistsForSongs(songIds: List<Long>): Flow<List<ArtistEntity>>
+
     @Query("DELETE FROM song_artist_cross_ref")
     suspend fun clearAllSongArtistCrossRefs()
 
@@ -471,7 +563,7 @@ interface MusicDao {
      */
     @Query("""
         SELECT DISTINCT artists.id, artists.name, artists.image_url,
-               (SELECT COUNT(*) FROM song_artist_cross_ref 
+               (SELECT COUNT(*) FROM song_artist_cross_ref
                 INNER JOIN songs ON song_artist_cross_ref.song_id = songs.id
                 WHERE song_artist_cross_ref.artist_id = artists.id
                 AND (:applyDirectoryFilter = 0 OR songs.parent_directory_path IN (:allowedParentDirs))) AS track_count
@@ -527,7 +619,7 @@ interface MusicDao {
         private const val SQLITE_MAX_VARIABLE_NUMBER = 999 // Increase if you know your SQLite version supports more
         private const val CROSS_REF_FIELDS_PER_OBJECT = 3
         val CROSS_REF_BATCH_SIZE: Int = SQLITE_MAX_VARIABLE_NUMBER / CROSS_REF_FIELDS_PER_OBJECT
-        
+
         /**
          * Batch size for song inserts during incremental sync.
          * Allows database reads to interleave with writes for better UX.

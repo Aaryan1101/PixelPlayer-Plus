@@ -63,7 +63,6 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,6 +87,7 @@ import com.theveloper.pixelplay.ui.theme.LocalPixelPlayDarkTheme
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
@@ -116,7 +116,7 @@ import com.theveloper.pixelplay.presentation.components.subcomps.LibraryActionRo
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
-import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
+import com.theveloper.pixelplay.presentation.viewmodel.PlaybackIndicatorUiState
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistUiState
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
 import com.theveloper.pixelplay.data.model.LibraryTabId
@@ -193,22 +193,22 @@ fun LibraryScreen(
 ) {
     // La recolección de estados de alto nivel se mantiene mínima.
     val context = LocalContext.current // Added context
-    val lastTabIndex by playerViewModel.lastLibraryTabIndexFlow.collectAsState()
-    val favoriteIds by playerViewModel.favoriteSongIds.collectAsState() // Reintroducir favoriteIds aquí
+    val lastTabIndex by playerViewModel.lastLibraryTabIndexFlow.collectAsStateWithLifecycle()
+    val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle() // Reintroducir favoriteIds aquí
     val scope = rememberCoroutineScope() // Mantener si se usa para acciones de UI
     val syncManager = playerViewModel.syncManager
     var isRefreshing by remember { mutableStateOf(false) }
-    val isSyncing by syncManager.isSyncing.collectAsState(initial = false)
-    val syncProgress by syncManager.syncProgress.collectAsState(initial = SyncProgress())
+    val isSyncing by syncManager.isSyncing.collectAsStateWithLifecycle(initialValue = false)
+    val syncProgress by syncManager.syncProgress.collectAsStateWithLifecycle(initialValue = SyncProgress())
 
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
-    val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsState()
-    val tabTitles by playerViewModel.libraryTabsFlow.collectAsState()
+    val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
+    val tabTitles by playerViewModel.libraryTabsFlow.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState(initialPage = lastTabIndex) { tabTitles.size }
-    val currentTabId by playerViewModel.currentLibraryTabId.collectAsState()
-    val libraryNavigationMode by playerViewModel.libraryNavigationMode.collectAsState()
-    val isSortSheetVisible by playerViewModel.isSortingSheetVisible.collectAsState()
+    val currentTabId by playerViewModel.currentLibraryTabId.collectAsStateWithLifecycle()
+    val libraryNavigationMode by playerViewModel.libraryNavigationMode.collectAsStateWithLifecycle()
+    val isSortSheetVisible by playerViewModel.isSortingSheetVisible.collectAsStateWithLifecycle()
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
 
     val m3uImportLauncher = rememberLauncherForActivityResult(
@@ -473,7 +473,7 @@ fun LibraryScreen(
                 ) {
                     Column(Modifier.fillMaxSize()) {
                         // OPTIMIZACIÓN: La lógica de ordenamiento ahora es más eficiente.
-                        val availableSortOptions by playerViewModel.availableSortOptions.collectAsState()
+                        val availableSortOptions by playerViewModel.availableSortOptions.collectAsStateWithLifecycle()
                         val sanitizedSortOptions = remember(availableSortOptions, currentTabId) {
                             val cleaned = availableSortOptions.filterIsInstance<SortOption>()
                             val ensured = if (cleaned.any { option ->
@@ -491,18 +491,18 @@ fun LibraryScreen(
                             val distinctByKey = ensured.distinctBy { it.storageKey }
                             distinctByKey.ifEmpty { listOf(currentTabId.defaultSort) }
                         }
-                        val playerUiState by playerViewModel.playerUiState.collectAsState()
-                        val playlistUiState by playlistViewModel.uiState.collectAsState()
-                        val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+                        val libraryControls by playerViewModel.libraryControlsUiState.collectAsStateWithLifecycle()
+                        val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
+                        val isShuffleEnabled by playerViewModel.shuffleEnabled.collectAsStateWithLifecycle()
 
                         val currentSelectedSortOption: SortOption? = when (currentTabId) {
-                            LibraryTabId.SONGS -> playerUiState.currentSongSortOption
-                            LibraryTabId.ALBUMS -> playerUiState.currentAlbumSortOption
-                            LibraryTabId.ARTISTS -> playerUiState.currentArtistSortOption
+                            LibraryTabId.SONGS -> libraryControls.songSort
+                            LibraryTabId.ALBUMS -> libraryControls.albumSort
+                            LibraryTabId.ARTISTS -> libraryControls.artistSort
                             LibraryTabId.PLAYLISTS -> playlistUiState.currentPlaylistSortOption
-                            LibraryTabId.LIKED -> playerUiState.currentFavoriteSortOption
-                            LibraryTabId.FOLDERS -> playerUiState.currentFolderSortOption
-                            LibraryTabId.DOWNLOADS -> playerUiState.currentSongSortOption
+                            LibraryTabId.LIKED -> libraryControls.favoriteSort
+                            LibraryTabId.FOLDERS -> libraryControls.folderSort
+                            LibraryTabId.DOWNLOADS -> libraryControls.songSort
                         }
 
                         val onSortOptionChanged: (SortOption) -> Unit = remember(playerViewModel, playlistViewModel, currentTabId) {
@@ -519,8 +519,6 @@ fun LibraryScreen(
                             }
                         }
 
-                        //val playerUiState by playerViewModel.playerUiState.collectAsState()
-                            //val playerUiState by playerViewModel.playerUiState.collectAsState()
                         LibraryActionRow(
                             modifier = Modifier
                                 .padding(
@@ -543,14 +541,14 @@ fun LibraryScreen(
                             showSortButton = sanitizedSortOptions.isNotEmpty(),
                             onSortClick = { playerViewModel.showSortingSheet() },
                             isPlaylistTab = currentTabId == LibraryTabId.PLAYLISTS,
-                            isFoldersTab = currentTabId == LibraryTabId.FOLDERS && (!playerUiState.isFoldersPlaylistView || playerUiState.currentFolder != null),
+                            isFoldersTab = currentTabId == LibraryTabId.FOLDERS && (!libraryControls.isFoldersPlaylistView || libraryControls.currentFolder != null),
                             onGenerateWithAiClick = { /* Unused now */ },
                             onImportM3uClick = { m3uImportLauncher.launch("audio/x-mpegurl") },
                             //onFilterClick = { playerViewModel.toggleFolderFilter() },
-                            currentFolder = playerUiState.currentFolder,
+                            currentFolder = libraryControls.currentFolder,
                             onFolderClick = { playerViewModel.navigateToFolder(it) },
                             onNavigateBack = { playerViewModel.navigateBackFolder() },
-                            isShuffleEnabled = stablePlayerState.isShuffleEnabled
+                            isShuffleEnabled = isShuffleEnabled
                         )
 
                         if (isSortSheetVisible && sanitizedSortOptions.isNotEmpty()) {
@@ -573,7 +571,7 @@ fun LibraryScreen(
                                     playerViewModel.hideSortingSheet()
                                 },
                                 showViewToggle = currentTabId == LibraryTabId.FOLDERS,
-                                viewToggleChecked = playerUiState.isFoldersPlaylistView,
+                                viewToggleChecked = libraryControls.isFoldersPlaylistView,
                                 onViewToggleChange = { isChecked ->
                                     playerViewModel.setFoldersPlaylistView(isChecked)
                                 }
@@ -594,13 +592,13 @@ fun LibraryScreen(
                                         playerViewModel.playerUiState
                                             .map { it.allSongs }
                                             .distinctUntilChanged()
-                                    }.collectAsState(initial = persistentListOf())
+                                    }.collectAsStateWithLifecycle(initialValue = persistentListOf())
 
                                     val isLoading by remember {
                                         playerViewModel.playerUiState
                                             .map { it.isLoadingInitialSongs }
                                             .distinctUntilChanged()
-                                    }.collectAsState(initial = songs.isEmpty())
+                                    }.collectAsStateWithLifecycle(initialValue = songs.isEmpty())
 
                                     LibrarySongsTab(
                                         songs = songs,
@@ -613,7 +611,7 @@ fun LibraryScreen(
                                     )
                                 }
                                 LibraryTabId.DOWNLOADS -> {
-                                    val downloadedSongs by playerViewModel.downloadedSongs.collectAsState()
+                                    val downloadedSongs by playerViewModel.downloadedSongs.collectAsStateWithLifecycle()
                                     LibrarySongsTab(
                                         songs = downloadedSongs,
                                         isLoadingInitial = false, // Downloaded songs load instantly
@@ -629,13 +627,13 @@ fun LibraryScreen(
                                         playerViewModel.playerUiState
                                             .map { it.albums }
                                             .distinctUntilChanged()
-                                    }.collectAsState(initial = persistentListOf())
+                                    }.collectAsStateWithLifecycle(initialValue = persistentListOf())
 
                                     val isLoading by remember {
                                         playerViewModel.playerUiState
                                             .map { it.isLoadingLibraryCategories }
                                             .distinctUntilChanged()
-                                    }.collectAsState(initial = albums.isEmpty())
+                                    }.collectAsStateWithLifecycle(initialValue = albums.isEmpty())
 
                                     val stableOnAlbumClick: (Long) -> Unit = remember(navController) {
                                         { albumId: Long ->
@@ -658,13 +656,13 @@ fun LibraryScreen(
                                         playerViewModel.playerUiState
                                             .map { it.artists }
                                             .distinctUntilChanged()
-                                    }.collectAsState(initial = persistentListOf())
+                                    }.collectAsStateWithLifecycle(initialValue = persistentListOf())
 
                                     val isLoading by remember {
                                         playerViewModel.playerUiState
                                             .map { it.isLoadingLibraryCategories }
                                             .distinctUntilChanged()
-                                    }.collectAsState(initial = artists.isEmpty())
+                                    }.collectAsStateWithLifecycle(initialValue = artists.isEmpty())
 
                                     LibraryArtistsTab(
                                         artists = artists,
@@ -684,7 +682,7 @@ fun LibraryScreen(
                                 }
 
                                 LibraryTabId.PLAYLISTS -> {
-                                    val currentPlaylistUiState by playlistViewModel.uiState.collectAsState()
+                                    val currentPlaylistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
                                     LibraryPlaylistsTab(
                                         playlistUiState = currentPlaylistUiState,
                                         navController = navController,
@@ -697,7 +695,7 @@ fun LibraryScreen(
                                 }
 
                                 LibraryTabId.LIKED -> {
-                                    val favoriteSongs by playerViewModel.favoriteSongs.collectAsState()
+                                    val favoriteSongs by playerViewModel.favoriteSongs.collectAsStateWithLifecycle()
                                     LibraryFavoritesTab(
                                         favoriteSongs = favoriteSongs,
                                         playerViewModel = playerViewModel,
@@ -718,18 +716,18 @@ fun LibraryScreen(
                                     }
 
                                     if (hasPermission) {
-                                        val playerUiState by playerViewModel.playerUiState.collectAsState()
-                                        val folders = playerUiState.musicFolders
-                                        val currentFolder = playerUiState.currentFolder
-                                        val isLoading = playerUiState.isLoadingLibraryCategories
-                                        val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+                                        val folderState by playerViewModel.libraryFoldersUiState.collectAsStateWithLifecycle()
+                                        val folders = folderState.folders
+                                        val currentFolder = folderState.currentFolder
+                                        val isLoading = folderState.isLoading
+                                        val playbackIndicator by playerViewModel.playbackIndicatorUiState.collectAsStateWithLifecycle()
 
                                         LibraryFoldersTab(
                                             folders = folders,
                                             currentFolder = currentFolder,
                                             isLoading = isLoading,
                                             bottomBarHeight = bottomBarHeightDp,
-                                            stablePlayerState = stablePlayerState,
+                                            playbackIndicator = playbackIndicator,
                                             onNavigateBack = { playerViewModel.navigateBackFolder() },
                                             onFolderClick = { folderPath -> playerViewModel.navigateToFolder(folderPath) },
                                             onFolderAsPlaylistClick = { folder ->
@@ -744,8 +742,8 @@ fun LibraryScreen(
                                                 playerViewModel.showAndPlaySong(song, queue, currentFolder?.name ?: "Folder")
                                             },
                                             onMoreOptionsClick = stableOnMoreOptionsClick,
-                                            isPlaylistView = playerUiState.isFoldersPlaylistView,
-                                            currentSortOption = playerUiState.currentFolderSortOption,
+                                            isPlaylistView = folderState.isPlaylistView,
+                                            currentSortOption = folderState.sortOption,
                                             isRefreshing = isRefreshing,
                                             onRefresh = onRefresh
                                         )
@@ -775,7 +773,7 @@ fun LibraryScreen(
                         }
                     }
                 }
-                val globalLoadingState by playerViewModel.playerUiState.collectAsState()
+                val globalLoadingState by playerViewModel.libraryLoadingUiState.collectAsStateWithLifecycle()
                 if (globalLoadingState.isGeneratingAiMetadata) {
                     Surface( // Fondo semitransparente para el indicador
                         modifier = Modifier.fillMaxSize(),
@@ -793,7 +791,10 @@ fun LibraryScreen(
                             }
                         }
                     }
-                } else if (globalLoadingState.isSyncingLibrary || ((globalLoadingState.isLoadingInitialSongs || globalLoadingState.isLoadingLibraryCategories) && (globalLoadingState.allSongs.isEmpty() && globalLoadingState.albums.isEmpty() && globalLoadingState.artists.isEmpty()))) {
+                } else if (globalLoadingState.isSyncing ||
+                    ((globalLoadingState.isLoadingInitialSongs || globalLoadingState.isLoadingCategories) &&
+                        !globalLoadingState.hasLibraryContent)
+                ) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f)
@@ -846,7 +847,7 @@ fun LibraryScreen(
         }
     }
 
-    val allSongs by playerViewModel.allSongsFlow.collectAsState(initial = emptyList())
+    val allSongs by playerViewModel.allSongsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
 
     CreatePlaylistDialog(
@@ -875,9 +876,9 @@ fun LibraryScreen(
     )
 
 
-    val showAiSheet by playerViewModel.showAiPlaylistSheet.collectAsState()
-    val isGeneratingAiPlaylist by playerViewModel.isGeneratingAiPlaylist.collectAsState()
-    val aiError by playerViewModel.aiError.collectAsState()
+    val showAiSheet by playerViewModel.showAiPlaylistSheet.collectAsStateWithLifecycle()
+    val isGeneratingAiPlaylist by playerViewModel.isGeneratingAiPlaylist.collectAsStateWithLifecycle()
+    val aiError by playerViewModel.aiError.collectAsStateWithLifecycle()
 
     if (showAiSheet) {
         AiPlaylistSheet(
@@ -954,7 +955,7 @@ fun LibraryScreen(
             )
 
             if (showPlaylistBottomSheet) {
-                val playlistUiState by playlistViewModel.uiState.collectAsState()
+                val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
 
                 PlaylistBottomSheet(
                     playlistUiState = playlistUiState,
@@ -1355,7 +1356,7 @@ fun LibraryFoldersTab(
     onFolderClick: (String) -> Unit,
     onFolderAsPlaylistClick: (MusicFolder) -> Unit,
     onPlaySong: (Song, List<Song>) -> Unit,
-    stablePlayerState: StablePlayerState,
+    playbackIndicator: PlaybackIndicatorUiState,
     bottomBarHeight: Dp,
     onMoreOptionsClick: (Song) -> Unit,
     isPlaylistView: Boolean = false,
@@ -1507,8 +1508,8 @@ fun LibraryFoldersTab(
                             items(songsToShow, key = { "song_${it.id}" }) { song ->
                                 EnhancedSongListItem(
                                     song = song,
-                                    isPlaying = stablePlayerState.currentSong?.id == song.id && stablePlayerState.isPlaying,
-                                    isCurrentSong = stablePlayerState.currentSong?.id == song.id,
+                                    isPlaying = playbackIndicator.currentSongId == song.id && playbackIndicator.isPlaying,
+                                    isCurrentSong = playbackIndicator.currentSongId == song.id,
                                     onMoreOptionsClick = { onMoreOptionsClick(song) },
                                     onClick = {
                                         val songIndex = songsToShow.indexOf(song)
@@ -1620,7 +1621,7 @@ fun LibraryFavoritesTab(
     isRefreshing: Boolean,
     onRefresh: () -> Unit
 ) {
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+    val playbackIndicator by playerViewModel.playbackIndicatorUiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
 
     // Scroll to top when the list changes due to sorting
@@ -1684,10 +1685,10 @@ fun LibraryFavoritesTab(
                 ) {
                     items(favoriteSongs, key = { "fav_${it.id}" }) { song ->
                         val isPlayingThisSong =
-                            song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
+                            song.id == playbackIndicator.currentSongId && playbackIndicator.isPlaying
                         EnhancedSongListItem(
                             song = song,
-                            isCurrentSong = stablePlayerState.currentSong?.id == song.id,
+                            isCurrentSong = playbackIndicator.currentSongId == song.id,
                             isPlaying = isPlayingThisSong,
                             onMoreOptionsClick = { onMoreOptionsClick(song) },
                             onClick = {
@@ -1718,7 +1719,7 @@ fun LibrarySongsTab(
     isRefreshing: Boolean,
     onRefresh: () -> Unit
 ) {
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+    val playbackIndicator by playerViewModel.playbackIndicatorUiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val imageLoader = context.imageLoader
@@ -1795,7 +1796,7 @@ fun LibrarySongsTab(
                         items(15) {
                             EnhancedSongListItem(
                                 song = Song.emptySong(), isPlaying = false, isLoading = true,
-                                isCurrentSong = songs.isNotEmpty() && stablePlayerState.currentSong == Song.emptySong(),
+                                isCurrentSong = false,
                                 onMoreOptionsClick = {}, onClick = {}
                             )
                         }
@@ -1863,7 +1864,7 @@ fun LibrarySongsTab(
                             item(key = "songs_top_spacer") { Spacer(Modifier.height(0.dp)) }
                             items(songs, key = { "song_${it.id}" }) { song ->
                                 val isPlayingThisSong =
-                                    song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
+                                    song.id == playbackIndicator.currentSongId && playbackIndicator.isPlaying
 
                                 // Estabilizar lambdas
                                 val rememberedOnMoreOptionsClick: (Song) -> Unit =
@@ -1881,7 +1882,7 @@ fun LibrarySongsTab(
                                 EnhancedSongListItem(
                                     song = song,
                                     isPlaying = isPlayingThisSong,
-                                    isCurrentSong = stablePlayerState.currentSong?.id == song.id,
+                                    isCurrentSong = playbackIndicator.currentSongId == song.id,
                                     isLoading = false,
                                     onMoreOptionsClick = rememberedOnMoreOptionsClick,
                                     onClick = rememberedOnClick
@@ -2329,7 +2330,7 @@ fun AlbumGridItemRedesigned(
     onClick: () -> Unit,
     isLoading: Boolean = false
 ) {
-    val albumColorSchemePair by albumColorSchemePairFlow.collectAsState()
+    val albumColorSchemePair by albumColorSchemePairFlow.collectAsStateWithLifecycle()
     val systemIsDark = LocalPixelPlayDarkTheme.current
 
     // 1. Obtén el colorScheme del tema actual aquí, en el scope Composable.

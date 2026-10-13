@@ -1,10 +1,18 @@
 package com.theveloper.pixelplay.data.stats
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.reflect.TypeToken
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.database.EngagementDao
+import com.theveloper.pixelplay.data.database.PlaybackEventEntity
+import com.theveloper.pixelplay.data.database.toLegacySongId
+import com.theveloper.pixelplay.data.database.toStableMediaKey
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.time.DayOfWeek
@@ -24,16 +32,27 @@ import javax.inject.Singleton
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 @Singleton
 class PlaybackStatsRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val engagementDao: EngagementDao,
+    private val dataStore: DataStore<Preferences>
 ) {
 
     private val gson = Gson()
     private val historyFile = File(context.filesDir, "playback_history.json")
     private val fileLock = Any()
     private val eventsType = object : TypeToken<MutableList<PlaybackEvent>>() {}.type
+    private val historyMigrationMutex = Mutex()
+    private val historyMigratedKey = booleanPreferencesKey("playback_history_migrated_to_room_v1")
 
     private val sessionGapThresholdMs = TimeUnit.MINUTES.toMillis(30)
 
@@ -144,7 +163,7 @@ class PlaybackStatsRepository @Inject constructor(
         val peakDayDurationMs: Long
     )
 
-    fun recordPlayback(
+    suspend fun recordPlayback(
         songId: String,
         durationMs: Long,
         timestamp: Long = System.currentTimeMillis()
@@ -160,52 +179,70 @@ class PlaybackStatsRepository @Inject constructor(
             startTimestamp = start,
             endTimestamp = coercedTimestamp
         )
-        synchronized(fileLock) {
-            val events = readEventsLocked()
-            val cutoff = sanitizedEvent.endMillis() - MAX_HISTORY_AGE_MS
-            if (cutoff > 0) {
-                events.removeAll { it.endMillis() < cutoff }
-            }
-            events += sanitizedEvent
-            writeEventsLocked(events)
-        }
+        ensureHistoryMigrated()
+        engagementDao.recordPlayback(sanitizedEvent.toEntity())
+        val cutoff = sanitizedEvent.endMillis() - MAX_HISTORY_AGE_MS
+        if (cutoff > 0) engagementDao.prunePlaybackEvents(cutoff)
     }
 
-    fun loadSummary(
+    fun observeRecentlyPlayedSongIds(limit: Int = 6): Flow<List<String>> = flow {
+        ensureHistoryMigrated()
+        emitAll(
+            engagementDao.observeRecentlyPlayedMediaKeys(limit.coerceAtLeast(1))
+                .map { mediaKeys -> mediaKeys.map { mediaKey -> mediaKey.toLegacySongId() } }
+        )
+    }
+
+    suspend fun loadSummary(
         range: StatsTimeRange,
         songs: List<Song>,
         nowMillis: Long = System.currentTimeMillis()
     ): PlaybackStatsSummary {
         val zoneId = ZoneId.systemDefault()
-        val allEvents = readEvents()
-        val (startBound, endBound) = range.resolveBounds(allEvents, nowMillis, zoneId)
-        val filteredEvents = allEvents.mapNotNull { event ->
-            val start = event.startMillis()
-            val end = event.endMillis()
-            val lowerBound = startBound ?: Long.MIN_VALUE
-            if (end < lowerBound || start > endBound) {
-                return@mapNotNull null
-            }
+        val initialBounds = range.resolveBounds(emptyList(), nowMillis, zoneId)
+        val allEvents = if (range == StatsTimeRange.ALL) {
+            readEvents()
+        } else {
+            readEvents(initialBounds.first ?: 0L, initialBounds.second)
+        }
+        val (startBound, endBound) = if (range == StatsTimeRange.ALL) {
+            range.resolveBounds(allEvents, nowMillis, zoneId)
+        } else {
+            initialBounds
+        }
+        val filteredEvents = if (range == StatsTimeRange.ALL) {
+            allEvents.mapNotNull { event ->
+                val start = event.startMillis()
+                val end = event.endMillis()
+                val lowerBound = startBound ?: Long.MIN_VALUE
+                if (end < lowerBound || start > endBound) {
+                    return@mapNotNull null
+                }
 
-            val clippedStart = max(start, lowerBound)
-            val clippedEnd = min(end, endBound)
-            val clippedDuration = (clippedEnd - clippedStart).coerceAtLeast(0L)
-            val baseDuration = event.durationMs.coerceAtLeast(0L)
-            val effectiveDuration = when {
-                clippedDuration > 0L -> clippedDuration
-                baseDuration > 0L -> baseDuration
-                else -> 0L
-            }
-            if (effectiveDuration <= 0L) {
-                return@mapNotNull null
-            }
+                val clippedStart = max(start, lowerBound)
+                val clippedEnd = min(end, endBound)
+                val clippedDuration = (clippedEnd - clippedStart).coerceAtLeast(0L)
+                val baseDuration = event.durationMs.coerceAtLeast(0L)
+                val effectiveDuration = when {
+                    clippedDuration > 0L -> clippedDuration
+                    baseDuration > 0L -> baseDuration
+                    else -> 0L
+                }
+                if (effectiveDuration <= 0L) {
+                    return@mapNotNull null
+                }
 
-            event.copy(
-                timestamp = clippedEnd,
-                durationMs = effectiveDuration,
-                startTimestamp = clippedStart,
-                endTimestamp = clippedEnd
-            )
+                event.copy(
+                    timestamp = clippedEnd,
+                    durationMs = effectiveDuration,
+                    startTimestamp = clippedStart,
+                    endTimestamp = clippedEnd
+                )
+            }
+        } else {
+            // Bounded queries are selected and clipped by SQLite, avoiding a second
+            // range/filter pass over every event on the application dispatcher.
+            allEvents.filter { it.durationMs > 0L }
         }
 
         val songMap = songs.associateBy { it.id }
@@ -416,7 +453,49 @@ class PlaybackStatsRepository @Inject constructor(
         )
     }
 
-    private fun readEvents(): List<PlaybackEvent> = synchronized(fileLock) { readEventsLocked() }
+    private suspend fun readEvents(): List<PlaybackEvent> {
+        ensureHistoryMigrated()
+        return engagementDao.allPlaybackEvents().map { it.toModel() }
+    }
+
+    private suspend fun readEvents(startInclusive: Long, endInclusive: Long): List<PlaybackEvent> {
+        ensureHistoryMigrated()
+        return engagementDao.clippedPlaybackEventsInRange(startInclusive, endInclusive).map { it.toModel() }
+    }
+
+    private suspend fun ensureHistoryMigrated() {
+        historyMigrationMutex.withLock {
+            if (dataStore.data.first()[historyMigratedKey] == true) return
+            val legacyEvents = synchronized(fileLock) { readEventsLocked() }
+            engagementDao.importLegacyData(
+                events = legacyEvents.map { it.toEntity() },
+                engagements = emptyList()
+            )
+            dataStore.edit { it[historyMigratedKey] = true }
+        }
+    }
+
+    private fun PlaybackEvent.toEntity(): PlaybackEventEntity {
+        val sanitized = sanitizeEvent(this)
+        return PlaybackEventEntity(
+            mediaKey = sanitized.songId.toStableMediaKey(),
+            timestamp = sanitized.endMillis(),
+            startedAt = sanitized.startMillis(),
+            endedAt = sanitized.endMillis(),
+            durationListenedMs = sanitized.durationMs,
+            completed = false
+        )
+    }
+
+    private fun PlaybackEventEntity.toModel(): PlaybackEvent {
+        return PlaybackEvent(
+            songId = mediaKey.toLegacySongId(),
+            timestamp = timestamp,
+            durationMs = durationListenedMs,
+            startTimestamp = startedAt,
+            endTimestamp = endedAt
+        )
+    }
 
     private fun readEventsLocked(): MutableList<PlaybackEvent> {
         if (!historyFile.exists()) {

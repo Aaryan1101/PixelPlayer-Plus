@@ -60,9 +60,9 @@ fun PrefetchAlbumNeighbors(
         snapshotFlow { pagerState.currentPage }
             .distinctUntilChanged()
             .collect { page ->
-                val indices = (page - radius..page + radius)
-                    .filter { it in queue.indices && it != page }
-                indices.forEach { idx ->
+                val neighbor = listOf(page + 1, page - 1)
+                    .firstOrNull { it in queue.indices && kotlin.math.abs(it - page) <= radius }
+                listOfNotNull(neighbor).forEach { idx ->
                     queue[idx].albumArtUriString?.let { uri ->
                         val req = coil.request.ImageRequest.Builder(context)
                             .data(uri)

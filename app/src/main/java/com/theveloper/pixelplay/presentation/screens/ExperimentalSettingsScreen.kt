@@ -44,7 +44,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +61,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
@@ -79,8 +79,8 @@ fun ExperimentalSettingsScreen(
     onNavigationIconClick: () -> Unit,
     settingsViewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val uiState by settingsViewModel.uiState.collectAsState()
-    val playerSheetState by playerViewModel.sheetState.collectAsState()
+    val uiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    val playerSheetState by playerViewModel.sheetState.collectAsStateWithLifecycle()
 
     BackHandler(enabled = playerSheetState == PlayerSheetState.EXPANDED) {
         playerViewModel.collapsePlayerSheet()

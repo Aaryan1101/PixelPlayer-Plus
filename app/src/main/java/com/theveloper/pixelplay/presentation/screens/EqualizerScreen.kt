@@ -65,7 +65,6 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.TabPosition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf // Added
@@ -99,6 +98,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.equalizer.EqualizerPreset
@@ -156,8 +156,8 @@ fun EqualizerScreen(
     playerViewModel: PlayerViewModel = hiltViewModel(),
     equalizerViewModel: EqualizerViewModel = hiltViewModel()
 ) {
-    val uiState by equalizerViewModel.uiState.collectAsState()
-    val playerSheetState by playerViewModel.sheetState.collectAsState()
+    val uiState by equalizerViewModel.uiState.collectAsStateWithLifecycle()
+    val playerSheetState by playerViewModel.sheetState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     
     // Sheet States
@@ -359,7 +359,7 @@ fun EqualizerScreen(
             
             // Volume Control
             item(key = "volume_control") {
-                val volume by equalizerViewModel.systemVolume.collectAsState()
+                val volume by equalizerViewModel.systemVolume.collectAsStateWithLifecycle()
                 VolumeControlCard(
                     volume = volume,
                     onVolumeChange = { equalizerViewModel.setSystemVolume(it) }

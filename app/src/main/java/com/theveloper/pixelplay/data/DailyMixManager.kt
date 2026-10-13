@@ -2,10 +2,18 @@ package com.theveloper.pixelplay.data
 
 import android.content.Context
 import android.util.Log
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
+import com.theveloper.pixelplay.data.database.EngagementDao
+import com.theveloper.pixelplay.data.database.SongEngagementEntity
+import com.theveloper.pixelplay.data.database.toLegacySongId
+import com.theveloper.pixelplay.data.database.toStableMediaKey
 import com.theveloper.pixelplay.data.model.Song
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -14,16 +22,23 @@ import java.util.LinkedHashSet
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 @Singleton
 class DailyMixManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val engagementDao: EngagementDao,
+    private val dataStore: DataStore<Preferences>
 ) {
 
     private val gson = Gson()
     private val scoresFile = File(context.filesDir, "song_scores.json")
     private val fileLock = Any()
     private val statsType = object : TypeToken<MutableMap<String, SongEngagementStats>>() {}.type
+    private val migrationMutex = Mutex()
+    private val engagementMigratedKey = booleanPreferencesKey("song_engagement_migrated_to_room_v1")
 
     data class SongEngagementStats(
         val playCount: Int = 0,
@@ -31,8 +46,36 @@ class DailyMixManager @Inject constructor(
         val lastPlayedTimestamp: Long = 0L
     )
 
-    private fun readEngagements(): MutableMap<String, SongEngagementStats> =
-        synchronized(fileLock) { readEngagementsLocked() }
+    private suspend fun readEngagements(): Map<String, SongEngagementStats> {
+        ensureEngagementsMigrated()
+        return engagementDao.allEngagements().associate { entity ->
+            entity.mediaKey.toLegacySongId() to SongEngagementStats(
+                playCount = entity.playCount,
+                totalPlayDurationMs = entity.totalListenedMs,
+                lastPlayedTimestamp = entity.lastPlayedAt
+            )
+        }
+    }
+
+    private suspend fun ensureEngagementsMigrated() {
+        migrationMutex.withLock {
+            if (dataStore.data.first()[engagementMigratedKey] == true) return
+            val legacyStats = synchronized(fileLock) { readEngagementsLocked() }
+            engagementDao.importLegacyData(
+                events = emptyList(),
+                engagements = legacyStats.map { (songId, stats) ->
+                    SongEngagementEntity(
+                        mediaKey = songId.toStableMediaKey(),
+                        playCount = stats.playCount,
+                        totalListenedMs = stats.totalPlayDurationMs,
+                        lastPlayedAt = stats.lastPlayedTimestamp,
+                        skipCount = 0
+                    )
+                }
+            )
+            dataStore.edit { it[engagementMigratedKey] = true }
+        }
+    }
 
     private fun readEngagementsLocked(): MutableMap<String, SongEngagementStats> {
         if (!scoresFile.exists()) {
@@ -169,41 +212,36 @@ class DailyMixManager @Inject constructor(
         }
     }
 
-    fun recordPlay(
+    suspend fun recordPlay(
         songId: String,
         songDurationMs: Long = 0L,
         timestamp: Long = System.currentTimeMillis()
     ) {
-        synchronized(fileLock) {
-            val engagements = readEngagementsLocked()
-            val currentStats = engagements[songId] ?: SongEngagementStats()
-            val updatedStats = currentStats.copy(
-                playCount = (currentStats.playCount + 1).coerceAtLeast(1),
-                totalPlayDurationMs = currentStats.totalPlayDurationMs + songDurationMs.coerceAtLeast(0L),
-                lastPlayedTimestamp = timestamp.coerceAtLeast(0L)
-            )
-            engagements[songId] = sanitizeStats(updatedStats)
-            saveEngagementsLocked(engagements)
-        }
+        ensureEngagementsMigrated()
+        engagementDao.incrementEngagement(
+            mediaKey = songId.toStableMediaKey(),
+            durationListenedMs = songDurationMs.coerceAtLeast(0L),
+            playedAt = timestamp.coerceAtLeast(0L)
+        )
     }
 
-    fun incrementScore(songId: String) {
+    suspend fun incrementScore(songId: String) {
         recordPlay(songId)
     }
 
-    fun getScore(songId: String): Int {
+    suspend fun getScore(songId: String): Int {
         return readEngagements()[songId]?.playCount ?: 0
     }
 
-    fun getEngagementStats(songId: String): SongEngagementStats? {
+    suspend fun getEngagementStats(songId: String): SongEngagementStats? {
         return readEngagements()[songId]
     }
 
-    fun getAllEngagementStats(): Map<String, SongEngagementStats> {
-        return readEngagements().toMap()
+    suspend fun getAllEngagementStats(): Map<String, SongEngagementStats> {
+        return readEngagements()
     }
 
-    private fun computeRankedSongs(
+    private suspend fun computeRankedSongs(
         allSongs: List<Song>,
         favoriteSongIds: Set<String>,
         random: java.util.Random
@@ -280,7 +318,7 @@ class DailyMixManager @Inject constructor(
             .sortedWith(compareByDescending<RankedSong> { it.finalScore }.thenBy { it.song.id })
     }
 
-    fun generateDailyMix(
+    suspend fun generateDailyMix(
         allSongs: List<Song>,
         favoriteSongIds: Set<String> = emptySet(),
         limit: Int = 30
@@ -311,7 +349,7 @@ class DailyMixManager @Inject constructor(
         return combined.take(limit.coerceAtMost(combined.size))
     }
 
-    fun generateYourMix(
+    suspend fun generateYourMix(
         allSongs: List<Song>,
         favoriteSongIds: Set<String> = emptySet(),
         limit: Int = 60

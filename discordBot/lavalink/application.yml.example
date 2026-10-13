@@ -1,0 +1,50 @@
+server:
+  port: 2333
+  address: 0.0.0.0
+
+lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:2be8e542d3f6f178e048dca565892684c2e40177"
+      snapshot: true
+  server:
+    password: "${LAVALINK_PASSWORD:replace-with-a-long-random-password}"
+    sources:
+      youtube: false
+      bandcamp: true
+      soundcloud: true
+      twitch: true
+      vimeo: true
+      nico: true
+      http: true
+      local: false
+    playerUpdateInterval: 5
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    # OAuth is required for the TV client. Use only a burner account, then store
+    # the generated refresh token in the ignored application.yml file.
+    # oauth:
+    #   enabled: true
+    #   refreshToken: "replace-with-your-burner-account-refresh-token"
+    remoteCipher:
+      url: "https://cipher.kikkia.dev/"
+      userAgent: "PixelPlayer-Plus"
+    clients:
+      - TV
+      - MUSIC
+      - TVHTML5_SIMPLY
+      - MWEB
+      - ANDROID_MUSIC
+      - IOS
+      - ANDROID_VR
+      - WEB
+      - WEBEMBEDDED
+
+logging:
+  level:
+    root: INFO
+    lavalink: INFO

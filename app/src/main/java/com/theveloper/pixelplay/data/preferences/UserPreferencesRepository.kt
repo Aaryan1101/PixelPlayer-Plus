@@ -12,6 +12,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.Player
+import com.theveloper.pixelplay.data.database.RoomPlaylistStore
+import com.theveloper.pixelplay.data.database.toLegacySongId
+import com.theveloper.pixelplay.data.database.toStableMediaKey
 import com.theveloper.pixelplay.data.model.Playlist
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.model.SortOption // Added import
@@ -50,7 +53,8 @@ class UserPreferencesRepository
 @Inject
 constructor(
         private val dataStore: DataStore<Preferences>,
-        private val json: Json // Inyectar Json para serialización
+        private val json: Json, // Inyectar Json para serialización
+        private val playlistStore: RoomPlaylistStore
 ) {
     @Serializable
     private data class SavedRemoteSong(
@@ -145,12 +149,12 @@ constructor(
         val VIRTUALIZER_ENABLED = booleanPreferencesKey("virtualizer_enabled")
         val LOUDNESS_ENHANCER_ENABLED = booleanPreferencesKey("loudness_enhancer_enabled")
         val LOUDNESS_ENHANCER_STRENGTH = intPreferencesKey("loudness_enhancer_strength")
-        
+
         // Dismissed Warning States
         val BASS_BOOST_DISMISSED = booleanPreferencesKey("bass_boost_dismissed")
         val VIRTUALIZER_DISMISSED = booleanPreferencesKey("virtualizer_dismissed")
         val LOUDNESS_DISMISSED = booleanPreferencesKey("loudness_dismissed")
-        
+
         // View Mode
         // val IS_GRAPH_VIEW = booleanPreferencesKey("is_graph_view") // Deprecated
         val VIEW_MODE = stringPreferencesKey("equalizer_view_mode")
@@ -158,10 +162,10 @@ constructor(
         // Custom Presets
         val CUSTOM_PRESETS = stringPreferencesKey("custom_presets_json") // List<EqualizerPreset>
         val PINNED_PRESETS = stringPreferencesKey("pinned_presets_json") // List<String> (names)
-        
+
         // Library Sync
         val LAST_SYNC_TIMESTAMP = longPreferencesKey("last_sync_timestamp")
-        
+
         // Lyrics Sync Offset per song (Map<songId, offsetMs> as JSON)
         val LYRICS_SYNC_OFFSETS = stringPreferencesKey("lyrics_sync_offsets_json")
     }
@@ -351,7 +355,7 @@ constructor(
     }
 
     // ===== Library Sync Settings =====
-    
+
     val lastSyncTimestampFlow: Flow<Long> =
             dataStore.data.map { preferences ->
                 preferences[PreferencesKeys.LAST_SYNC_TIMESTAMP] ?: 0L
@@ -370,7 +374,7 @@ constructor(
     // ===== End Library Sync Settings =====
 
     // ===== Lyrics Sync Offset Settings =====
-    
+
     /**
      * Lyrics sync offset per song in milliseconds.
      * Stored as a JSON map: { "songId": offsetMs, ... }
@@ -405,13 +409,13 @@ constructor(
                     mutableMapOf()
                 }
             } ?: mutableMapOf()
-            
+
             if (offsetMs == 0) {
                 currentOffsets.remove(songId) // Don't store default value
             } else {
                 currentOffsets[songId] = offsetMs
             }
-            
+
             preferences[PreferencesKeys.LYRICS_SYNC_OFFSETS] = json.encodeToString(currentOffsets)
         }
     }
@@ -527,7 +531,7 @@ constructor(
             val delayMetadata = preferences[PreferencesKeys.FULL_PLAYER_DELAY_METADATA] ?: true
             val delayProgress = preferences[PreferencesKeys.FULL_PLAYER_DELAY_PROGRESS] ?: true
             val delayControls = preferences[PreferencesKeys.FULL_PLAYER_DELAY_CONTROLS] ?: true
-            
+
             val delayAll = delayAlbum && delayMetadata && delayProgress && delayControls
 
             FullPlayerLoadingTweaks(
@@ -545,7 +549,9 @@ constructor(
     val favoriteSongIdsFlow: Flow<Set<String>> =
             dataStore.data // Nuevo flujo para favoritos
                     .map { preferences ->
-                preferences[PreferencesKeys.FAVORITE_SONG_IDS] ?: emptySet()
+                preferences[PreferencesKeys.FAVORITE_SONG_IDS]
+                    .orEmpty()
+                    .mapTo(linkedSetOf()) { it.toStableMediaKey().toLegacySongId() }
             }
 
     val playlistSongOrderModesFlow: Flow<Map<String, String>> =
@@ -559,20 +565,10 @@ constructor(
                 }
             }
 
-    val userPlaylistsFlow: Flow<List<Playlist>> =
-            dataStore.data.map { preferences ->
-                val jsonString = preferences[PreferencesKeys.USER_PLAYLISTS]
-                if (jsonString != null) {
-                    try {
-                        json.decodeFromString<List<Playlist>>(jsonString)
-                    } catch (e: Exception) {
-                        // Error al deserializar, devolver lista vacía o manejar error
-                        emptyList()
-                    }
-                } else {
-                    emptyList()
-                }
-            }
+    val userPlaylistsFlow: Flow<List<Playlist>> = playlistStore.playlists
+
+    suspend fun searchUserPlaylists(query: String, limit: Int): List<Playlist> =
+            playlistStore.search(query, limit)
 
     val savedRemoteSongsFlow: Flow<List<Song>> =
             dataStore.data.map { preferences ->
@@ -580,14 +576,9 @@ constructor(
                     .map { it.toSong() }
             }
 
-    private suspend fun savePlaylists(playlists: List<Playlist>) {
-        dataStore.edit { preferences ->
-            preferences[PreferencesKeys.USER_PLAYLISTS] = json.encodeToString(playlists)
-        }
-    }
-
     suspend fun saveRemoteSong(song: Song) {
         if (song.id.toLongOrNull() != null) return
+        playlistStore.saveOnlineSong(song)
         dataStore.edit { preferences ->
             val currentSongs = decodeSavedRemoteSongs(preferences[PreferencesKeys.SAVED_REMOTE_SONGS])
             val updatedSongs = (currentSongs.filterNot { it.id == song.id } + song.toSavedRemoteSong())
@@ -662,7 +653,6 @@ constructor(
             coverShapeDetail3: Float? = null,
             coverShapeDetail4: Float? = null
     ): Playlist {
-        val currentPlaylists = userPlaylistsFlow.first().toMutableList()
         val newPlaylist =
                 Playlist(
                         id = UUID.randomUUID().toString(),
@@ -679,51 +669,25 @@ constructor(
                         coverShapeDetail3 = coverShapeDetail3,
                         coverShapeDetail4 = coverShapeDetail4
                 )
-        currentPlaylists.add(newPlaylist)
-        savePlaylists(currentPlaylists)
+        playlistStore.create(newPlaylist)
         return newPlaylist
     }
 
     suspend fun deletePlaylist(playlistId: String) {
-        val currentPlaylists = userPlaylistsFlow.first().toMutableList()
-        currentPlaylists.removeAll { it.id == playlistId }
-        savePlaylists(currentPlaylists)
+        playlistStore.delete(playlistId)
         clearPlaylistSongOrderMode(playlistId)
     }
 
     suspend fun renamePlaylist(playlistId: String, newName: String) {
-        val currentPlaylists = userPlaylistsFlow.first().toMutableList()
-        val index = currentPlaylists.indexOfFirst { it.id == playlistId }
-        if (index != -1) {
-            currentPlaylists[index] =
-                    currentPlaylists[index].copy(
-                            name = newName,
-                            lastModified = System.currentTimeMillis()
-                    )
-            savePlaylists(currentPlaylists)
-        }
+        playlistStore.rename(playlistId, newName)
     }
 
     suspend fun updatePlaylist(playlist: Playlist) {
-        val currentPlaylists = userPlaylistsFlow.first().toMutableList()
-        val index = currentPlaylists.indexOfFirst { it.id == playlist.id }
-        if (index != -1) {
-            currentPlaylists[index] = playlist.copy(lastModified = System.currentTimeMillis())
-            savePlaylists(currentPlaylists)
-        }
+        playlistStore.update(playlist)
     }
 
     suspend fun addSongsToPlaylist(playlistId: String, songIdsToAdd: List<String>) {
-        val currentPlaylists = userPlaylistsFlow.first().toMutableList()
-        val index = currentPlaylists.indexOfFirst { it.id == playlistId }
-        if (index != -1) {
-            val playlist = currentPlaylists[index]
-            // Evitar duplicados, añadir solo los nuevos
-            val newSongIds = (playlist.songIds + songIdsToAdd).distinct()
-            currentPlaylists[index] =
-                    playlist.copy(songIds = newSongIds, lastModified = System.currentTimeMillis())
-            savePlaylists(currentPlaylists)
-        }
+        playlistStore.addSongs(playlistId, songIdsToAdd)
     }
 
     /*
@@ -734,83 +698,19 @@ constructor(
             songId: String,
             playlistIds: List<String>
     ): MutableList<String> {
-        val currentPlaylists = userPlaylistsFlow.first().toMutableList()
-        val removedPlaylistIds = mutableListOf<String>()
-
-        // adding to playlist if not already in
-        playlistIds.forEach { playlistId ->
-            val index = currentPlaylists.indexOfFirst { it.id == playlistId }
-            if (index != -1) {
-                val playlist = currentPlaylists[index]
-                if (playlist.songIds.contains(songId)) return@forEach
-                else {
-                    val newSongIds = (playlist.songIds + songId).distinct()
-                    currentPlaylists[index] =
-                            playlist.copy(
-                                    songIds = newSongIds,
-                                    lastModified = System.currentTimeMillis()
-                            )
-                    savePlaylists(currentPlaylists)
-                }
-            }
-        }
-
-        // removing from playlist if not in playlistIds
-        currentPlaylists.forEach { playlist ->
-            if (playlist.songIds.contains(songId) && !playlistIds.contains(playlist.id)) {
-                removeSongFromPlaylist(playlist.id, songId)
-                removedPlaylistIds.add(playlist.id)
-            }
-        }
-        return removedPlaylistIds
+        return playlistStore.synchronizeSongMembership(songId, playlistIds).toMutableList()
     }
 
     suspend fun removeSongFromPlaylist(playlistId: String, songIdToRemove: String) {
-        val currentPlaylists = userPlaylistsFlow.first().toMutableList()
-        val index = currentPlaylists.indexOfFirst { it.id == playlistId }
-        if (index != -1) {
-            val playlist = currentPlaylists[index]
-            currentPlaylists[index] =
-                    playlist.copy(
-                            songIds = playlist.songIds.filterNot { it == songIdToRemove },
-                            lastModified = System.currentTimeMillis()
-                    )
-            savePlaylists(currentPlaylists)
-        }
+        playlistStore.removeSong(playlistId, songIdToRemove)
     }
 
     suspend fun removeSongFromAllPlaylists(songId: String) {
-        val currentPlaylists = userPlaylistsFlow.first().toMutableList()
-        var updated = false
-
-        // Iterate through all playlists and remove the song
-        currentPlaylists.forEachIndexed { index, playlist ->
-            if (playlist.songIds.contains(songId)) {
-                currentPlaylists[index] =
-                        playlist.copy(
-                                songIds = playlist.songIds.filterNot { it == songId },
-                                lastModified = System.currentTimeMillis()
-                        )
-                updated = true
-            }
-        }
-
-        if (updated) {
-            savePlaylists(currentPlaylists)
-        }
+        playlistStore.removeSongFromAll(songId)
     }
 
     suspend fun reorderSongsInPlaylist(playlistId: String, newSongOrderIds: List<String>) {
-        val currentPlaylists = userPlaylistsFlow.first().toMutableList()
-        val index = currentPlaylists.indexOfFirst { it.id == playlistId }
-        if (index != -1) {
-            currentPlaylists[index] =
-                    currentPlaylists[index].copy(
-                            songIds = newSongOrderIds,
-                            lastModified = System.currentTimeMillis()
-                    )
-            savePlaylists(currentPlaylists)
-        }
+        playlistStore.reorder(playlistId, newSongOrderIds)
     }
 
     suspend fun setPlaylistSongOrderMode(playlistId: String, modeValue: String) {
@@ -875,14 +775,31 @@ constructor(
             removing: Boolean = false
     ) { // Nueva función para favoritos
         dataStore.edit { preferences ->
-            val currentFavorites = preferences[PreferencesKeys.FAVORITE_SONG_IDS] ?: emptySet()
-            val contains = currentFavorites.contains(songId)
+            val stableSongId = songId.toStableMediaKey()
+            val currentFavorites = preferences[PreferencesKeys.FAVORITE_SONG_IDS]
+                .orEmpty()
+                .mapTo(linkedSetOf()) { it.toStableMediaKey() }
+            val contains = currentFavorites.contains(stableSongId)
 
-            if (contains) preferences[PreferencesKeys.FAVORITE_SONG_IDS] = currentFavorites - songId
+            if (contains) preferences[PreferencesKeys.FAVORITE_SONG_IDS] = currentFavorites - stableSongId
             else {
                 if (removing)
-                        preferences[PreferencesKeys.FAVORITE_SONG_IDS] = currentFavorites - songId
-                else preferences[PreferencesKeys.FAVORITE_SONG_IDS] = currentFavorites + songId
+                        preferences[PreferencesKeys.FAVORITE_SONG_IDS] = currentFavorites - stableSongId
+                else preferences[PreferencesKeys.FAVORITE_SONG_IDS] = currentFavorites + stableSongId
+            }
+        }
+    }
+
+    suspend fun setFavoriteSong(songId: String, isFavorite: Boolean) {
+        dataStore.edit { preferences ->
+            val stableSongId = songId.toStableMediaKey()
+            val currentFavorites = preferences[PreferencesKeys.FAVORITE_SONG_IDS]
+                .orEmpty()
+                .mapTo(linkedSetOf()) { it.toStableMediaKey() }
+            preferences[PreferencesKeys.FAVORITE_SONG_IDS] = if (isFavorite) {
+                currentFavorites + stableSongId
+            } else {
+                currentFavorites - stableSongId
             }
         }
     }
@@ -1116,7 +1033,7 @@ constructor(
             val testUrl = url.trim().let {
                 if (!it.endsWith("/")) "$it/" else it
             } + "search?q=test"
-            
+
             // Simple HTTP request to test if instance is reachable
             val connection = java.net.URL(testUrl).openConnection() as java.net.HttpURLConnection
             connection.requestMethod = "HEAD"
@@ -1124,7 +1041,7 @@ constructor(
             connection.readTimeout = 5000
             val responseCode = connection.responseCode
             connection.disconnect()
-            
+
             responseCode in 200..299
         } catch (e: Exception) {
             false
@@ -1206,7 +1123,7 @@ constructor(
     suspend fun setDelayAllFullPlayerContent(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.FULL_PLAYER_DELAY_ALL] = enabled
-            
+
             preferences[PreferencesKeys.FULL_PLAYER_DELAY_ALBUM] = enabled
             preferences[PreferencesKeys.FULL_PLAYER_DELAY_METADATA] = enabled
             preferences[PreferencesKeys.FULL_PLAYER_DELAY_PROGRESS] = enabled
@@ -1402,35 +1319,35 @@ constructor(
                 emptyList()
             }
         }
-        
+
     suspend fun saveCustomPreset(preset: EqualizerPreset) {
         val current = customPresetsFlow.first().toMutableList()
         // Remove existing if overwriting (by name)
         current.removeAll { it.name == preset.name }
         current.add(preset)
-        
+
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.CUSTOM_PRESETS] = json.encodeToString(current)
         }
     }
-    
+
     suspend fun deleteCustomPreset(presetName: String) {
         val current = customPresetsFlow.first().toMutableList()
         current.removeAll { it.name == presetName }
-        
+
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.CUSTOM_PRESETS] = json.encodeToString(current)
         }
-        
+
         // Also remove from pinned if present
         val pinned = pinnedPresetsFlow.first().toMutableList()
         if (pinned.remove(presetName)) {
             setPinnedPresets(pinned)
         }
     }
-    
+
     // ===== Pinned Presets Persistence =====
-    
+
     val pinnedPresetsFlow: Flow<List<String>> =
         dataStore.data.map { preferences ->
             val jsonString = preferences[PreferencesKeys.PINNED_PRESETS]
@@ -1446,7 +1363,7 @@ constructor(
                  EqualizerPreset.ALL_PRESETS.map { it.name }
             }
         }
-        
+
     suspend fun setPinnedPresets(presetNames: List<String>) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.PINNED_PRESETS] = json.encodeToString(presetNames)

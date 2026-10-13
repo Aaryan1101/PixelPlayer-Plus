@@ -5,6 +5,13 @@ build/
 
 # Local properties
 local.properties
+/discordBot/.env
+/discordBot/.env.*
+!/discordBot/.env.example
+/discordBot/lavalink/application.yml
+/discordBot/lavalink/plugins/
+/discordBot/lavalink/Lavalink.jar
+/discordBot/control-panel/
 
 # IDE files
 .idea/

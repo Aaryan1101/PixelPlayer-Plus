@@ -195,6 +195,16 @@ This is an enhanced fork of the original PixelPlayer by [theovilardo](https://gi
   </a>
 </p>
 
+### Important update note for existing Android users
+
+PixelPlayer+ now uses the Android package name `io.github.aaryan1101.pixelplayerplus`.
+If you installed an older build that used the previous package name, uninstall that old app before
+installing v2.5.0. Android treats the new package as a different application, so the old app's
+history, favourites, playlists, and settings cannot be migrated automatically.
+
+We are sorry for the history and settings loss caused by this one-time package-name change. Future
+PixelPlayer+ updates will continue using the new package name.
+
 ---
 
 ## 📂 Project Structure

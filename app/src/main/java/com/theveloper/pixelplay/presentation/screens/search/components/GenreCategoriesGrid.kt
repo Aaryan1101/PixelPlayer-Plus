@@ -1,14 +1,10 @@
 package com.theveloper.pixelplay.presentation.screens.search.components
 
-import android.util.Log
-import androidx.annotation.OptIn
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -18,207 +14,134 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
-import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.R
-import com.theveloper.pixelplay.data.model.Genre
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.NavBarContentHeight
-import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.components.getNavigationBarHeight
-import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 
-@OptIn(UnstableApi::class)
+@Immutable
+data class ExploreCategory(
+    val id: String,
+    val title: String,
+    val searchQuery: String,
+    val iconRes: Int,
+    val startColor: Color,
+    val endColor: Color
+)
+
+val onlineExploreCategories = listOf(
+    ExploreCategory("trending", "Trending", "trending songs latest official audio", R.drawable.rounded_explosion_24, Color(0xFF7B1FA2), Color(0xFF4A148C)),
+    ExploreCategory("new_releases", "New releases", "new music releases latest official audio", R.drawable.round_newspaper_24, Color(0xFF00695C), Color(0xFF004D40)),
+    ExploreCategory("punjabi", "Punjabi", "latest Punjabi songs official audio", R.drawable.rattle, Color(0xFFE65100), Color(0xFF9F2D00)),
+    ExploreCategory("bollywood", "Bollywood", "latest Bollywood songs official audio", R.drawable.star_angle, Color(0xFFC62828), Color(0xFF7F0000)),
+    ExploreCategory("hindi", "Hindi hits", "Hindi hit songs official audio", R.drawable.rounded_music_note_24, Color(0xFFAD1457), Color(0xFF78002E)),
+    ExploreCategory("pop", "Pop", "pop hit songs official audio", R.drawable.pop_mic, Color(0xFF1565C0), Color(0xFF003C8F)),
+    ExploreCategory("hip_hop", "Hip-Hop", "latest hip hop songs official audio", R.drawable.rapper, Color(0xFF4527A0), Color(0xFF23036A)),
+    ExploreCategory("romance", "Romance", "romantic songs hits official audio", R.drawable.round_favorite_24, Color(0xFFD81B60), Color(0xFF880E4F)),
+    ExploreCategory("chill", "Chill", "chill songs playlist official audio", R.drawable.rounded_surround_sound_24, Color(0xFF00838F), Color(0xFF005662)),
+    ExploreCategory("workout", "Workout", "workout songs high energy official audio", R.drawable.rounded_instant_mix_24, Color(0xFFEF6C00), Color(0xFFB53D00)),
+    ExploreCategory("party", "Party", "party dance songs hits official audio", R.drawable.rounded_celebration_24, Color(0xFF6A1B9A), Color(0xFF38006B)),
+    ExploreCategory("indie", "Indie", "latest indie songs official audio", R.drawable.acoustic_guitar, Color(0xFF2E7D32), Color(0xFF005005))
+)
+
 @Composable
-fun GenreCategoriesGrid(
-    genres: List<Genre>,
-    onGenreClick: (Genre) -> Unit,
-    playerViewModel: PlayerViewModel,
+fun OnlineExploreGrid(
+    onCategoryClick: (ExploreCategory) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (genres.isEmpty()) {
-        Box(
-            modifier = modifier.fillMaxSize().padding(16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("No genres available.", style = MaterialTheme.typography.bodyLarge)
-        }
-        return
-    }
-
     val systemNavBarHeight = getNavigationBarHeight()
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 18.dp)
-            .clip(AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 24.dp,
-                smoothnessAsPercentTR = 70,
-                cornerRadiusTL = 24.dp,
-                smoothnessAsPercentTL = 70,
-                cornerRadiusBR = 0.dp,
-                smoothnessAsPercentBR = 70,
-                cornerRadiusBL = 0.dp,
-                smoothnessAsPercentBL = 70
-            )),
+            .padding(horizontal = 18.dp),
         contentPadding = PaddingValues(
             top = 8.dp,
             bottom = 28.dp + NavBarContentHeight + MiniPlayerHeight + systemNavBarHeight
         ),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Text(
-                text = "Browse by genre",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier
-                    .padding(start = 6.dp, top = 6.dp, bottom = 6.dp)
+                text = "Explore",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 8.dp)
             )
         }
-        items(genres, key = { it.id }) { genre ->
-            // CORREGIDO: Obtener las URIs de manera más robusta
-            GenreCard(
-                genre = genre,
-                onClick = { onGenreClick(genre) }
-            )
+
+        items(onlineExploreCategories, key = ExploreCategory::id) { category ->
+            ExploreCategoryCard(category = category, onClick = { onCategoryClick(category) })
         }
     }
 }
 
 @Composable
-private fun GenreCard(
-    genre: Genre,
-    onClick: () -> Unit
+fun ExploreCategoryCard(
+    category: ExploreCategory,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val backgroundColor = remember(genre) {
-        Color(android.graphics.Color.parseColor(genre.lightColorHex ?: "#7D5260")) // Fallback color
-    }
-    val onBackgroundColor = remember(genre) {
-        Color(android.graphics.Color.parseColor(genre.onLightColorHex ?: "#FFFFFF")) // Fallback color
-    }
+    val shape = AbsoluteSmoothCornerShape(
+        cornerRadiusTR = 20.dp,
+        smoothnessAsPercentTR = 70,
+        cornerRadiusTL = 20.dp,
+        smoothnessAsPercentTL = 70,
+        cornerRadiusBR = 20.dp,
+        smoothnessAsPercentBR = 70,
+        cornerRadiusBL = 20.dp,
+        smoothnessAsPercentBL = 70
+    )
 
-    Card(
-        modifier = Modifier
-            .aspectRatio(1.2f)
-            .clip(AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 24.dp,
-                smoothnessAsPercentTL = 70,
-                cornerRadiusTL = 24.dp,
-                smoothnessAsPercentTR = 70,
-                cornerRadiusBR = 24.dp,
-                smoothnessAsPercentBL = 70,
-                cornerRadiusBL = 24.dp,
-                smoothnessAsPercentBR = 70
-            ))
-            .clickable(onClick = onClick),
-        shape = AbsoluteSmoothCornerShape(
-            cornerRadiusTR = 24.dp,
-            smoothnessAsPercentTL = 70,
-            cornerRadiusTL = 24.dp,
-            smoothnessAsPercentTR = 70,
-            cornerRadiusBR = 24.dp,
-            smoothnessAsPercentBL = 70,
-            cornerRadiusBL = 24.dp,
-            smoothnessAsPercentBR = 70
-        ),
-        colors = CardDefaults.cardColors(containerColor = backgroundColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    Box(
+        modifier = modifier
+            .aspectRatio(1.45f)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(category.startColor, category.endColor)))
+            .clickable(onClick = onClick)
     ) {
-        Box(
+        Icon(
+            painter = painterResource(category.iconRes),
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.62f),
             modifier = Modifier
-                .fillMaxSize()
-                .clip(RoundedCornerShape(24.dp))
-                .background(backgroundColor)
-        ) {
-            // Imagen del género en esquina inferior derecha
-            Box(
-                modifier = Modifier
-                    .size(108.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 20.dp, y = 20.dp)
-            ) {
-                SmartImage(
-                    model = getGenreImageResource(genre.id), // Use genre.id for image resource
-                    contentDescription = "Genre illustration",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .alpha(0.55f),
-                    colorFilter = ColorFilter.tint(onBackgroundColor),
-                    contentScale = ContentScale.Crop
-                )
-            }
+                .size(78.dp)
+                .align(Alignment.BottomEnd)
+                .offset(x = 12.dp, y = 12.dp)
+                .rotate(16f)
+        )
 
-            // Nombre del género en esquina superior izquierda
-            Text(
-                text = genre.name,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp
-                ),
-                color = onBackgroundColor,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp)
-            )
-        }
-    }
-}
-
-
-
-private fun getGenreImageResource(genreId: String): Any {
-    return when (genreId.lowercase()) {
-        "rock" -> R.drawable.rock
-        "pop" -> R.drawable.pop_mic
-        "jazz" -> R.drawable.sax
-        "classical" -> R.drawable.clasic_piano
-        "electronic" -> R.drawable.electronic_sound
-        "hip hop", "hip-hop", "rap" -> R.drawable.rapper
-        "country" -> R.drawable.banjo
-        "blues" -> R.drawable.harmonica
-        "reggae" -> R.drawable.maracas
-        "metal" -> R.drawable.metal_guitar
-        "folk" -> R.drawable.accordion
-        "r&b / soul", "rnb" -> R.drawable.synth_piano
-        "punk" -> R.drawable.punk
-        "indie" -> R.drawable.idk_indie_ig
-        "folk & acoustic" -> R.drawable.acoustic_guitar
-        "alternative" -> R.drawable.alt_video
-        "latino", "latin" -> R.drawable.star_angle
-        "reggaeton" -> R.drawable.rapper
-        "salsa" -> R.drawable.conga
-        "bachata" -> R.drawable.bongos
-        "merengue" -> R.drawable.drum
-        "unknown" -> R.drawable.rounded_question_mark_24 // Add icon for unknown genre
-        else -> R.drawable.genre_default
+        Text(
+            text = category.title,
+            color = Color.White,
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            ),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 14.dp, top = 14.dp, end = 56.dp)
+        )
     }
 }

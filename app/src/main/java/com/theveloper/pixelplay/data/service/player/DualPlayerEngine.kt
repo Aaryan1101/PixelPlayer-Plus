@@ -1,28 +1,36 @@
 package com.theveloper.pixelplay.data.service.player
 
+import android.app.ActivityManager
 import android.content.Context
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.Build
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 //import androidx.media3.exoplayer.ffmpeg.FfmpegAudioRenderer
 import com.theveloper.pixelplay.data.model.TransitionSettings
+import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.utils.envelope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.asStateFlow // Added
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,13 +45,23 @@ import javax.inject.Singleton
 @Singleton
 class DualPlayerEngine @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val userPreferencesRepository: UserPreferencesRepository,
 ) {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var transitionJob: Job? = null
     private var transitionRunning = false
+    private var audioOffloadAllowed = true
 
     private var playerA: ExoPlayer
-    private var playerB: ExoPlayer
+    private var auxiliaryPlayer: ExoPlayer? = null
+    private val playerB: ExoPlayer
+        get() = auxiliaryPlayer ?: buildPlayer(
+            handleAudioFocus = false,
+            allowAudioOffload = false
+        ).also {
+            auxiliaryPlayer = it
+            Timber.tag("TransitionDebug").d("Auxiliary player created lazily")
+        }
 
     private val onPlayerSwappedListeners = mutableListOf<(Player) -> Unit>()
     
@@ -62,21 +80,21 @@ class DualPlayerEngine @Inject constructor(
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS. Pausing.")
                 isFocusLossPause = false
                 playerA.playWhenReady = false
-                playerB.playWhenReady = false
+                auxiliaryPlayer?.playWhenReady = false
                 abandonAudioFocus()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT. Pausing.")
                 isFocusLossPause = true
                 playerA.playWhenReady = false
-                playerB.playWhenReady = false
+                auxiliaryPlayer?.playWhenReady = false
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
                 Timber.tag("TransitionDebug").d("AudioFocus GAIN. Resuming if paused by loss.")
                 if (isFocusLossPause) {
                     isFocusLossPause = false
                     playerA.playWhenReady = true
-                    if (transitionRunning) playerB.playWhenReady = true
+                    if (transitionRunning) auxiliaryPlayer?.playWhenReady = true
                 }
             }
         }
@@ -120,16 +138,35 @@ class DualPlayerEngine @Inject constructor(
     fun getAudioSessionId(): Int = playerA.audioSessionId
 
     init {
-        // We initialize BOTH players with NO internal focus handling.
-        // We manage Audio Focus manually via AudioFocusManager.
-        playerA = buildPlayer(handleAudioFocus = false)
-        playerB = buildPlayer(handleAudioFocus = false)
+        // The master is always available; the auxiliary player is created only
+        // after a transition has been validated and needs pre-buffering.
+        playerA = buildPlayer(handleAudioFocus = false, allowAudioOffload = true)
 
         // Attach listener to initial master
         playerA.addListener(masterPlayerListener)
         
         // Initialize active session ID
         _activeAudioSessionId.value = playerA.audioSessionId
+
+        scope.launch {
+            combine(
+                userPreferencesRepository.equalizerEnabledFlow,
+                userPreferencesRepository.bassBoostEnabledFlow,
+                userPreferencesRepository.virtualizerEnabledFlow,
+                userPreferencesRepository.loudnessEnhancerEnabledFlow
+            ) { equalizer, bassBoost, virtualizer, loudness ->
+                !equalizer && !bassBoost && !virtualizer && !loudness
+            }
+                .distinctUntilChanged()
+                .collect { allowed ->
+                    audioOffloadAllowed = allowed
+                    playerA.setAudioOffloadEnabled(allowed)
+                    Timber.tag("AudioOffload").d(
+                        "Offload allowed=%s (disabled while audio effects are active)",
+                        allowed
+                    )
+                }
+        }
     }
 
     private fun requestAudioFocus() {
@@ -161,21 +198,86 @@ class DualPlayerEngine @Inject constructor(
         }
     }
 
-    private fun buildPlayer(handleAudioFocus: Boolean): ExoPlayer {
+    private fun buildPlayer(
+        handleAudioFocus: Boolean,
+        allowAudioOffload: Boolean
+    ): ExoPlayer {
         val renderersFactory = DefaultRenderersFactory(context)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        val isLowRamDevice = context
+            .getSystemService(ActivityManager::class.java)
+            ?.isLowRamDevice == true
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ if (isLowRamDevice) 12_000 else 25_000,
+                /* maxBufferMs = */ if (isLowRamDevice) 30_000 else 60_000,
+                /* bufferForPlaybackMs = */ 1_000,
+                /* bufferForPlaybackAfterRebufferMs = */ 2_000
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
 
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .setUsage(C.USAGE_MEDIA)
             .build()
 
-        return ExoPlayer.Builder(context, renderersFactory).build().apply {
+        val player = ExoPlayer.Builder(context, renderersFactory)
+            .setLoadControl(loadControl)
+            .build()
+
+        player.apply {
             setAudioAttributes(audioAttributes, handleAudioFocus)
             setHandleAudioBecomingNoisy(handleAudioFocus)
+            setWakeMode(C.WAKE_MODE_LOCAL)
+            setAudioOffloadEnabled(allowAudioOffload)
             // Explicitly keep both players live so they can overlap without affecting each other
             playWhenReady = false
         }
+
+        player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                updateWakeMode(player, mediaItem)
+            }
+        })
+        player.addAudioOffloadListener(object : ExoPlayer.AudioOffloadListener {
+            override fun onOffloadedPlayback(offloadedPlayback: Boolean) {
+                Timber.tag("AudioOffload").d(
+                    "Player offload active=%s mediaId=%s",
+                    offloadedPlayback,
+                    player.currentMediaItem?.mediaId
+                )
+            }
+        })
+        return player
+    }
+
+    private fun ExoPlayer.setAudioOffloadEnabled(enabled: Boolean) {
+        val offloadMode = if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
+        } else {
+            AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+        }
+        val preferences = AudioOffloadPreferences.Builder()
+            .setAudioOffloadMode(offloadMode)
+            .build()
+        trackSelectionParameters = trackSelectionParameters
+            .buildUpon()
+            .setAudioOffloadPreferences(preferences)
+            .build()
+    }
+
+    private fun updateWakeMode(player: ExoPlayer, mediaItem: MediaItem?) {
+        val uri = mediaItem?.localConfiguration?.uri
+        val isNetworkStream = uri?.scheme.equals("http", ignoreCase = true) ||
+            uri?.scheme.equals("https", ignoreCase = true)
+        player.setWakeMode(if (isNetworkStream) C.WAKE_MODE_NETWORK else C.WAKE_MODE_LOCAL)
+        Timber.tag("AudioOffload").d(
+            "Wake mode=%s mediaId=%s uri=%s",
+            if (isNetworkStream) "network" else "local",
+            mediaItem?.mediaId,
+            uri?.scheme
+        )
     }
 
     /**
@@ -196,6 +298,7 @@ class DualPlayerEngine @Inject constructor(
             playerB.clearMediaItems()
             playerB.playWhenReady = false
             playerB.setMediaItem(mediaItem)
+            updateWakeMode(playerB, mediaItem)
             playerB.prepare()
             playerB.volume = 0f // Start silent
             if (startPositionMs > 0) {
@@ -217,10 +320,14 @@ class DualPlayerEngine @Inject constructor(
     fun cancelNext() {
         transitionJob?.cancel()
         transitionRunning = false
-        if (playerB.mediaItemCount > 0) {
-            Timber.tag("TransitionDebug").d("Engine: Cancelling next player")
-            playerB.stop()
-            playerB.clearMediaItems()
+        auxiliaryPlayer?.let { player ->
+            if (player.mediaItemCount > 0) {
+                Timber.tag("TransitionDebug").d("Engine: Cancelling next player")
+                player.stop()
+                player.clearMediaItems()
+            }
+            player.release()
+            auxiliaryPlayer = null
         }
         // Ensure master player is full volume if we cancel and reset focus logic
         playerA.volume = 1f
@@ -231,20 +338,29 @@ class DualPlayerEngine @Inject constructor(
      * Executes a transition based on the provided settings.
      */
     fun performTransition(settings: TransitionSettings) {
+        if (auxiliaryPlayer == null) {
+            Timber.tag("TransitionDebug").w("Skipping transition because no auxiliary player was prepared")
+            return
+        }
         transitionJob?.cancel()
         transitionRunning = true
         transitionJob = scope.launch {
             try {
                 // Force Overlap for now as per instructions
                 performOverlapTransition(settings)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (e: Exception) {
                 Timber.tag("TransitionDebug").e(e, "Error performing transition")
                 // Fallback: Restore volume and reset logic
                 playerA.volume = 1f
                 setPauseAtEndOfMediaItems(false)
-                playerB.stop()
+                auxiliaryPlayer?.stop()
             } finally {
                 transitionRunning = false
+                // The short-lived incoming player uses normal decoding during overlap.
+                // Once it becomes master, optional offload can safely be selected again.
+                playerA.setAudioOffloadEnabled(audioOffloadAllowed)
             }
         }
     }
@@ -351,7 +467,7 @@ class DualPlayerEngine @Inject constructor(
 
         // 4. Swap References
         playerA = incomingPlayer
-        playerB = outgoingPlayer
+        auxiliaryPlayer = outgoingPlayer
         
         // Critical: Reset pauseAtEndOfMediaItems on both players after swap.
         // The outgoing player (now B) had pauseAtEndOfMediaItems=true set before the transition started.
@@ -428,10 +544,11 @@ class DualPlayerEngine @Inject constructor(
         playerB.stop()
         playerB.clearMediaItems()
 
-        // Fresh Player Strategy: Release and recreate playerB to avoid OEM "stale session" tracking
+        // Release the outgoing auxiliary player. A fresh one will be created
+        // lazily only if another validated transition needs it.
         playerB.release()
-        playerB = buildPlayer(handleAudioFocus = false)
-        Timber.tag("TransitionDebug").d("Old Player (B) released and recreated fresh.")
+        auxiliaryPlayer = null
+        Timber.tag("TransitionDebug").d("Old auxiliary player released after transition.")
 
         // Ensure New Player (A) is fully active and unrestricted
         setPauseAtEndOfMediaItems(false)
@@ -443,6 +560,7 @@ class DualPlayerEngine @Inject constructor(
     fun release() {
         transitionJob?.cancel()
         playerA.release()
-        playerB.release()
+        auxiliaryPlayer?.release()
+        auxiliaryPlayer = null
     }
 }

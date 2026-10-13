@@ -2,19 +2,19 @@ package com.theveloper.pixelplay.desktop
 
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
-import androidx.compose.ui.window.isTraySupported
 import androidx.compose.ui.window.rememberWindowState
 import com.theveloper.pixelplay.desktop.integration.DesktopNotifier
+import com.theveloper.pixelplay.desktop.integration.NativeDesktopTray
+import com.theveloper.pixelplay.desktop.model.DesktopDestination
 import java.awt.Dimension
 import java.awt.EventQueue
 import java.io.Closeable
@@ -22,6 +22,8 @@ import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import kotlin.concurrent.thread
+import kotlin.system.exitProcess
 
 fun main() {
     val instanceLease = acquireInstanceLease()
@@ -33,40 +35,73 @@ fun main() {
     try {
         application {
             var isWindowVisible by remember { mutableStateOf(true) }
+            var quitRequested by remember { mutableStateOf(false) }
             val controller = remember {
                 DesktopController(
                     onRequestShow = { EventQueue.invokeLater { isWindowVisible = true } },
-                    onRequestQuit = { EventQueue.invokeLater { exitApplication() } },
+                    onRequestQuit = { EventQueue.invokeLater { quitRequested = true } },
                 )
             }
+            val uiState by controller.state.collectAsState()
             var hasExplainedBackgroundPlayback by remember { mutableStateOf(false) }
             val windowState = rememberWindowState(size = DpSize(1280.dp, 720.dp))
+            val tray = remember {
+                NativeDesktopTray(
+                    onOpen = { EventQueue.invokeLater { isWindowVisible = true } },
+                    onPlayPause = controller::togglePlayPause,
+                    onPrevious = controller::playPrevious,
+                    onNext = { controller.playNext() },
+                    onToggleNotifications = {
+                        controller.setNotificationsEnabled(!controller.state.value.notificationsEnabled)
+                    },
+                    onOpenSettings = {
+                        EventQueue.invokeLater {
+                            controller.navigate(DesktopDestination.SETTINGS)
+                            isWindowVisible = true
+                        }
+                    },
+                    onQuit = { EventQueue.invokeLater { quitRequested = true } },
+                )
+            }
+
+            LaunchedEffect(quitRequested) {
+                if (quitRequested) {
+                    controller.close()
+                    thread(name = "pixelplayer-exit-fallback", isDaemon = true) {
+                        Thread.sleep(1_500)
+                        exitProcess(0)
+                    }
+                    exitApplication()
+                }
+            }
 
             DisposableEffect(controller) {
                 onDispose(controller::close)
             }
 
-            if (isTraySupported) {
-                Tray(
-                    icon = painterResource("icon.png"),
-                    tooltip = "PixelPlayer",
-                    menu = {
-                        Item("Open PixelPlayer", onClick = { isWindowVisible = true })
-                        Item("Play / Pause", onClick = controller::togglePlayPause)
-                        Item("Next", onClick = { controller.playNext() })
-                        Separator()
-                        Item("Quit PixelPlayer", onClick = { exitApplication() })
-                    },
-                )
+            LaunchedEffect(uiState) {
+                tray.update(uiState)
+            }
+
+            DisposableEffect(tray) {
+                onDispose(tray::close)
             }
 
             if (isWindowVisible) {
                 Window(
                     onCloseRequest = {
-                        isWindowVisible = false
-                        if (!hasExplainedBackgroundPlayback) {
-                            hasExplainedBackgroundPlayback = true
-                            DesktopNotifier.showRunningInBackground()
+                        if (tray.isAvailable && uiState.closeToTray) {
+                            isWindowVisible = false
+                            if (
+                                !hasExplainedBackgroundPlayback &&
+                                uiState.notificationsEnabled &&
+                                uiState.backgroundNotifications
+                            ) {
+                                hasExplainedBackgroundPlayback = true
+                                DesktopNotifier.showRunningInBackground()
+                            }
+                        } else {
+                            quitRequested = true
                         }
                     },
                     title = "PixelPlayer",

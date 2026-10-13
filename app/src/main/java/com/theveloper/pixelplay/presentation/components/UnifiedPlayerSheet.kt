@@ -79,15 +79,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -105,6 +108,7 @@ import androidx.compose.ui.util.lerp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import androidx.media3.common.util.UnstableApi
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import coil.size.Size
 import com.theveloper.pixelplay.R
@@ -168,9 +172,7 @@ fun UnifiedPlayerSheet(
 
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
     // Granular collection for playerUiState fields used directly by UnifiedPlayerSheet or its main sub-components
-    val currentPosition by remember {
-        playerViewModel.playerUiState.map { it.currentPosition }.distinctUntilChanged()
-    }.collectAsState(initial = 0L)
+    val currentPosition by playerViewModel.currentPosition.collectAsStateWithLifecycle()
     val remotePosition by playerViewModel.remotePosition.collectAsState()
     val isRemotePlaybackActive by playerViewModel.isRemotePlaybackActive.collectAsState()
     val positionToDisplay = if (isRemotePlaybackActive) remotePosition else currentPosition
@@ -216,15 +218,22 @@ fun UnifiedPlayerSheet(
     val scope = rememberCoroutineScope()
 
     val offsetAnimatable = remember { Animatable(0f) }
+    var directDismissDragOffset by remember { mutableFloatStateOf(0f) }
+    var isDirectDismissDragActive by remember { mutableStateOf(false) }
+    val visualDismissOffset by remember {
+        derivedStateOf {
+            if (isDirectDismissDragActive) directDismissDragOffset else offsetAnimatable.value
+        }
+    }
 
     val screenWidthPx =
         remember(configuration, density) { with(density) { configuration.screenWidthDp.dp.toPx() } }
     val dismissThresholdPx = remember(screenWidthPx) { screenWidthPx * 0.4f }
 
-    val swipeDismissProgress = remember(offsetAnimatable.value, dismissThresholdPx) {
+    val swipeDismissProgress = remember(visualDismissOffset, dismissThresholdPx) {
         derivedStateOf {
             if (dismissThresholdPx == 0f) 0f
-            else (abs(offsetAnimatable.value) / dismissThresholdPx).coerceIn(0f, 1f)
+            else (abs(visualDismissOffset) / dismissThresholdPx).coerceIn(0f, 1f)
         }
     }
 
@@ -233,20 +242,10 @@ fun UnifiedPlayerSheet(
         density
     ) { with(density) { configuration.screenHeightDp.dp.toPx() } }
     val miniPlayerContentHeightPx = remember { with(density) { MiniPlayerHeight.toPx() } }
-    val miniPlayerAndSpacerHeightPx =
-        remember(density, MiniPlayerHeight) { with(density) { MiniPlayerHeight.toPx() } }
-
     val isCastConnecting by playerViewModel.isCastConnecting.collectAsState()
 
     val showPlayerContentArea by remember {
         derivedStateOf { stablePlayerState.currentSong != null || isCastConnecting }
-    }
-
-    // Use the granular showDismissUndoBar here
-    val isPlayerSlotOccupied by remember(showPlayerContentArea, showDismissUndoBar) {
-        derivedStateOf {
-            showPlayerContentArea || showDismissUndoBar
-        }
     }
 
     val playerContentExpansionFraction = playerViewModel.playerContentExpansionFraction
@@ -265,6 +264,14 @@ fun UnifiedPlayerSheet(
     val initialY =
         if (currentSheetContentState == PlayerSheetState.COLLAPSED) sheetCollapsedTargetY else sheetExpandedTargetY
     val currentSheetTranslationY = remember { Animatable(initialY) }
+    var directSheetTranslationY by remember { mutableStateOf<Float?>(null) }
+    var directExpansionFraction by remember { mutableStateOf<Float?>(null) }
+    val renderedSheetTranslationY by remember {
+        derivedStateOf { directSheetTranslationY ?: currentSheetTranslationY.value }
+    }
+    val renderedExpansionFraction by remember {
+        derivedStateOf { directExpansionFraction ?: playerContentExpansionFraction.value }
+    }
 
     LaunchedEffect(
         navController,
@@ -286,7 +293,7 @@ fun UnifiedPlayerSheet(
 
     val fullPlayerContentAlpha by remember {
         derivedStateOf {
-            (playerContentExpansionFraction.value - 0.25f).coerceIn(0f, 0.75f) / 0.75f
+            (renderedExpansionFraction - 0.25f).coerceIn(0f, 0.75f) / 0.75f
         }
     }
 
@@ -388,90 +395,35 @@ fun UnifiedPlayerSheet(
         }
     }
 
-    val playerContentAreaActualHeightPx by remember(
-        showPlayerContentArea,
-        playerContentExpansionFraction,
-        containerHeight,
-        miniPlayerContentHeightPx
-    ) {
-        derivedStateOf {
-            if (showPlayerContentArea) {
-                val containerHeightPx = with(density) { containerHeight.toPx() }
-                lerp(
-                    miniPlayerContentHeightPx,
-                    containerHeightPx,
-                    playerContentExpansionFraction.value
-                )
-            } else {
-                0f
-            }
-        }
-    }
-    val playerContentAreaHeightDp by remember(
-        showPlayerContentArea,
-        playerContentExpansionFraction,
-        containerHeight
-    ) {
-        derivedStateOf {
-            if (showPlayerContentArea) lerp(
-                MiniPlayerHeight,
-                containerHeight,
-                playerContentExpansionFraction.value
-            )
-            else 0.dp
-        }
-    }
-    val playerContentAreaActualHeightDp = with(density) { playerContentAreaActualHeightPx.toDp() }
-
-    val totalSheetHeightWhenContentCollapsedPx = remember(
-        isPlayerSlotOccupied,
-        hideMiniPlayer,
-        miniPlayerAndSpacerHeightPx
-    ) {
-        if (isPlayerSlotOccupied && !hideMiniPlayer) miniPlayerAndSpacerHeightPx else 0f
-    }
-
-    val animatedTotalSheetHeightPx by remember(
-        isPlayerSlotOccupied,
-        playerContentExpansionFraction,
-        screenHeightPx,
-        totalSheetHeightWhenContentCollapsedPx
-    ) {
-        derivedStateOf {
-            if (isPlayerSlotOccupied) {
-                lerp(
-                    totalSheetHeightWhenContentCollapsedPx,
-                    screenHeightPx,
-                    playerContentExpansionFraction.value
-                )
-            } else {
-                0f
-            }
-        }
-    }
-
-    val navBarElevation = 3.dp
-    val shadowSpacePx = remember(density, navBarElevation) {
-        with(density) { (navBarElevation * 8).toPx() }
-    }
-
-    val animatedTotalSheetHeightWithShadowPx by remember(
-        animatedTotalSheetHeightPx,
-        shadowSpacePx
-    ) {
-        derivedStateOf {
-            animatedTotalSheetHeightPx + shadowSpacePx
-        }
-    }
-    val animatedTotalSheetHeightWithShadowDp =
-        with(density) { animatedTotalSheetHeightWithShadowPx.toDp() }
-
-    //with(density) { animatedTotalSheetHeightPx.toDp() }
-
     val visualSheetTranslationY by remember {
         derivedStateOf {
-            currentSheetTranslationY.value * (1f - predictiveBackCollapseProgress) +
+            renderedSheetTranslationY * (1f - predictiveBackCollapseProgress) +
                     (sheetCollapsedTargetY * predictiveBackCollapseProgress)
+        }
+    }
+
+    // Keep the sheet at a fixed layout height for smooth dragging, but only paint the
+    // portion that is currently visible. Without this draw clip, the collapsed sheet's
+    // album color continues below the mini-player and shows through the transparent
+    // Android navigation bar.
+    val containerHeightPx = remember(containerHeight, density) {
+        with(density) { containerHeight.toPx() }
+    }
+    val visiblePlayerHeightPx by remember {
+        derivedStateOf {
+            val expansion = if (
+                predictiveBackCollapseProgress > 0f &&
+                currentSheetContentState == PlayerSheetState.EXPANDED
+            ) {
+                lerp(renderedExpansionFraction, 0f, predictiveBackCollapseProgress)
+            } else {
+                renderedExpansionFraction
+            }
+            lerp(
+                miniPlayerContentHeightPx,
+                containerHeightPx,
+                expansion.coerceIn(0f, 1f)
+            )
         }
     }
 
@@ -498,7 +450,7 @@ fun UnifiedPlayerSheet(
                     val expandedCorner = 0.dp
                     lerp(expandedCorner, collapsedCornerTarget, predictiveBackCollapseProgress)
                 } else {
-                    val fraction = playerContentExpansionFraction.value
+                    val fraction = renderedExpansionFraction
                     val expandedTarget = 0.dp
                     lerp(collapsedCornerTarget, expandedTarget, fraction)
                 }
@@ -530,7 +482,7 @@ fun UnifiedPlayerSheet(
     ) {
         derivedStateOf {
             if (navBarStyle == NavBarStyle.FULL_WIDTH) {
-                val fraction = playerContentExpansionFraction.value
+                val fraction = renderedExpansionFraction
                 return@derivedStateOf lerp(32.dp, 26.dp, fraction)
             }
 
@@ -541,7 +493,7 @@ fun UnifiedPlayerSheet(
                     lerp(expandedRadius, collapsedRadiusTarget, predictiveBackCollapseProgress)
                 } else {
                     if (showPlayerContentArea) {
-                        val fraction = playerContentExpansionFraction.value
+                        val fraction = renderedExpansionFraction
                         val collapsedRadius = if (isNavBarHidden) 60.dp else 12.dp
                         if (fraction < 0.2f) {
                             lerp(collapsedRadius, 26.dp, (fraction / 0.2f).coerceIn(0f, 1f))
@@ -560,7 +512,7 @@ fun UnifiedPlayerSheet(
             if (currentSheetContentState == PlayerSheetState.COLLAPSED &&
                 swipeDismissProgress.value > 0f &&
                 showPlayerContentArea &&
-                playerContentExpansionFraction.value < 0.01f
+                renderedExpansionFraction < 0.01f
             ) {
                 val baseCollapsedRadius = if (isNavBarHidden) 32.dp else 12.dp
                 lerp(baseCollapsedRadius, navBarCornerRadius.dp, swipeDismissProgress.value)
@@ -589,7 +541,7 @@ fun UnifiedPlayerSheet(
                 lerp(
                     actualCollapsedStateHorizontalPadding,
                     0.dp,
-                    playerContentExpansionFraction.value
+                    renderedExpansionFraction
                 )
             } else {
                 actualCollapsedStateHorizontalPadding
@@ -603,7 +555,7 @@ fun UnifiedPlayerSheet(
         currentSheetContentState
     ) {
         derivedStateOf {
-            val baseAlpha = playerContentExpansionFraction.value
+            val baseAlpha = renderedExpansionFraction
             if (predictiveBackCollapseProgress > 0f && currentSheetContentState == PlayerSheetState.EXPANDED) {
                 lerp(baseAlpha, 0f, predictiveBackCollapseProgress)
             } else {
@@ -619,6 +571,10 @@ fun UnifiedPlayerSheet(
         }
     }
     val queueSheetOffset = remember(screenHeightPx) { Animatable(screenHeightPx) }
+    var directQueueDragOffset by remember { mutableStateOf<Float?>(null) }
+    val renderedQueueSheetOffset by remember {
+        derivedStateOf { directQueueDragOffset ?: queueSheetOffset.value }
+    }
     var queueSheetHeightPx by remember { mutableFloatStateOf(0f) }
     val queueHiddenOffsetPx by remember(currentBottomPadding, queueSheetHeightPx, density) {
         derivedStateOf {
@@ -640,10 +596,11 @@ fun UnifiedPlayerSheet(
     LaunchedEffect(queueHiddenOffsetPx) {
         if (queueHiddenOffsetPx <= 0f) return@LaunchedEffect
         val targetOffset = if (showQueueSheet) {
-            queueSheetOffset.value.coerceIn(0f, queueHiddenOffsetPx)
+            renderedQueueSheetOffset.coerceIn(0f, queueHiddenOffsetPx)
         } else {
             queueHiddenOffsetPx
         }
+        directQueueDragOffset = null
         queueSheetOffset.snapTo(targetOffset)
     }
 
@@ -654,6 +611,7 @@ fun UnifiedPlayerSheet(
         }
         val target = if (targetExpanded) 0f else queueHiddenOffsetPx
         showQueueSheet = true
+        directQueueDragOffset = null
         queueSheetOffset.animateTo(
             targetValue = target,
             animationSpec = tween(
@@ -672,22 +630,29 @@ fun UnifiedPlayerSheet(
     fun beginQueueDrag() {
         if (queueHiddenOffsetPx == 0f || !allowQueueSheetInteraction) return
         showQueueSheet = true
+        directQueueDragOffset = queueSheetOffset.value
         scope.launch { queueSheetOffset.stop() }
     }
 
     fun dragQueueBy(dragAmount: Float) {
         if (queueHiddenOffsetPx == 0f || !allowQueueSheetInteraction) return
-        val newOffset = (queueSheetOffset.value + dragAmount).coerceIn(0f, queueHiddenOffsetPx)
-        scope.launch { queueSheetOffset.snapTo(newOffset) }
+        directQueueDragOffset =
+            ((directQueueDragOffset ?: queueSheetOffset.value) + dragAmount)
+                .coerceIn(0f, queueHiddenOffsetPx)
     }
 
     fun endQueueDrag(totalDrag: Float, velocity: Float) {
         if (queueHiddenOffsetPx == 0f || !allowQueueSheetInteraction) return
         val isFastUpward = velocity < -650f
         val isFastDownward = velocity > 650f
+        val releaseOffset = renderedQueueSheetOffset
         val shouldExpand =
-            isFastUpward || (!isFastDownward && (queueSheetOffset.value < queueHiddenOffsetPx - queueDragThresholdPx || totalDrag < -queueDragThresholdPx))
-        animateQueueSheet(shouldExpand)
+            isFastUpward || (!isFastDownward && (releaseOffset < queueHiddenOffsetPx - queueDragThresholdPx || totalDrag < -queueDragThresholdPx))
+        scope.launch {
+            queueSheetOffset.snapTo(releaseOffset)
+            directQueueDragOffset = null
+            animateQueueSheetInternal(shouldExpand)
+        }
     }
 
     val hapticFeedback = LocalHapticFeedback.current
@@ -695,8 +660,8 @@ fun UnifiedPlayerSheet(
 
     LaunchedEffect(queueHiddenOffsetPx, showQueueSheet) {
         if (queueHiddenOffsetPx == 0f) return@LaunchedEffect
-        var hasHitTopEdge = showQueueSheet && queueSheetOffset.value <= 0.5f
-        snapshotFlow { queueSheetOffset.value to showQueueSheet }
+        var hasHitTopEdge = showQueueSheet && renderedQueueSheetOffset <= 0.5f
+        snapshotFlow { renderedQueueSheetOffset to showQueueSheet }
             .collectLatest { (offset, isShown) ->
                 val isFullyOpen = isShown && offset <= 0.5f
                 if (isFullyOpen && !hasHitTopEdge) {
@@ -711,6 +676,7 @@ fun UnifiedPlayerSheet(
     LaunchedEffect(allowQueueSheetInteraction, queueHiddenOffsetPx) {
         if (allowQueueSheetInteraction) return@LaunchedEffect
         showQueueSheet = false
+        directQueueDragOffset = null
         if (queueHiddenOffsetPx > 0f) {
             queueSheetOffset.snapTo(queueHiddenOffsetPx)
         }
@@ -757,12 +723,12 @@ fun UnifiedPlayerSheet(
     }
 
     val isQueueVisible by remember(showQueueSheet, queueHiddenOffsetPx) {
-        derivedStateOf { showQueueSheet && queueHiddenOffsetPx > 0f && queueSheetOffset.value < queueHiddenOffsetPx }
+        derivedStateOf { showQueueSheet && queueHiddenOffsetPx > 0f && renderedQueueSheetOffset < queueHiddenOffsetPx }
     }
 
-    val queueOpenFraction by remember(queueSheetOffset, queueHiddenOffsetPx) {
+    val queueOpenFraction by remember(renderedQueueSheetOffset, queueHiddenOffsetPx) {
         derivedStateOf {
-            if (queueHiddenOffsetPx == 0f) 0f else (1f - (queueSheetOffset.value / queueHiddenOffsetPx)).coerceIn(
+            if (queueHiddenOffsetPx == 0f) 0f else (1f - (renderedQueueSheetOffset / queueHiddenOffsetPx)).coerceIn(
                 0f,
                 1f
             )
@@ -824,7 +790,7 @@ fun UnifiedPlayerSheet(
 
     val albumColorScheme = targetColorScheme
 
-    val t = rememberExpansionTransition(playerContentExpansionFraction.value)
+    val t = rememberExpansionTransition(renderedExpansionFraction)
 
     val playerAreaElevation by t.animateDp(label = "elev") { f -> lerp(2.dp, 12.dp, f) }
 
@@ -857,7 +823,23 @@ fun UnifiedPlayerSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(0, visualSheetTranslationY.roundToInt()) }
-                .height(containerHeight),
+                .layout { measurable, constraints ->
+                    val fixedHeight = containerHeightPx.roundToInt()
+                        .coerceIn(constraints.minHeight, constraints.maxHeight)
+                    val placeable = measurable.measure(
+                        constraints.copy(minHeight = fixedHeight, maxHeight = fixedHeight)
+                    )
+                    val interactiveHeight = visiblePlayerHeightPx.roundToInt()
+                        .coerceIn(0, fixedHeight)
+                    layout(placeable.width, interactiveHeight) {
+                        placeable.placeRelative(0, 0)
+                    }
+                }
+                .drawWithContent {
+                    clipRect(bottom = visiblePlayerHeightPx) {
+                        this@drawWithContent.drawContent()
+                    }
+                },
             shadowElevation = 0.dp,
             color = Color.Transparent
         ) {
@@ -874,13 +856,15 @@ fun UnifiedPlayerSheet(
                         val dismissGestureModifier =
                             if (currentSheetContentState == PlayerSheetState.COLLAPSED) {
                                 Modifier.pointerInput(Unit) {
-                                    var accumulatedDragX by mutableFloatStateOf(0f)
-                                    var dragPhase by mutableStateOf(DragPhase.IDLE)
+                                    var accumulatedDragX = 0f
+                                    var dragPhase = DragPhase.IDLE
 
                                     detectHorizontalDragGestures(
                                         onDragStart = {
                                             dragPhase = DragPhase.TENSION
                                             accumulatedDragX = 0f
+                                            directDismissDragOffset = offsetAnimatable.value
+                                            isDirectDismissDragActive = true
                                             scope.launch { offsetAnimatable.stop() }
                                         },
                                         onHorizontalDrag = { change, dragAmount ->
@@ -905,11 +889,8 @@ fun UnifiedPlayerSheet(
                                                                 maxTensionOffsetPx,
                                                                 dragFraction
                                                             )
-                                                        scope.launch {
-                                                            offsetAnimatable.snapTo(
-                                                                tensionOffset * accumulatedDragX.sign
-                                                            )
-                                                        }
+                                                        directDismissDragOffset =
+                                                            tensionOffset * accumulatedDragX.sign
                                                     } else {
                                                         // Threshold crossed, transition to the snap phase
                                                         dragPhase = DragPhase.SNAPPING
@@ -920,31 +901,13 @@ fun UnifiedPlayerSheet(
                                                     hapticFeedback.performHapticFeedback(
                                                         HapticFeedbackType.LongPress
                                                     )
-                                                    // On the first frame of snapping, launch the soft spring animation
-                                                    scope.launch {
-                                                        offsetAnimatable.animateTo(
-                                                            targetValue = accumulatedDragX,
-                                                            animationSpec = spring(
-                                                                dampingRatio = 0.8f,
-                                                                stiffness = Spring.StiffnessLow
-                                                            )
-                                                        )
-                                                    }
+                                                    directDismissDragOffset = accumulatedDragX
                                                     // Immediately transition to free drag so subsequent events are handled there
                                                     dragPhase = DragPhase.FREE_DRAG
                                                 }
 
                                                 DragPhase.FREE_DRAG -> {
-                                                    // After the initial snap, track the finger with a very stiff spring to feel 1-to-1
-                                                    scope.launch {
-                                                        offsetAnimatable.animateTo(
-                                                            targetValue = accumulatedDragX,
-                                                            animationSpec = spring(
-                                                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                                                stiffness = Spring.StiffnessHigh
-                                                            )
-                                                        )
-                                                    }
+                                                    directDismissDragOffset = accumulatedDragX
                                                 }
 
                                                 else -> {}
@@ -953,10 +916,13 @@ fun UnifiedPlayerSheet(
                                         onDragEnd = {
                                             dragPhase = DragPhase.IDLE
                                             val dismissThreshold = screenWidthPx * 0.4f
+                                            val releaseOffset = directDismissDragOffset
                                             if (abs(accumulatedDragX) > dismissThreshold) {
                                                 val targetDismissOffset =
                                                     if (accumulatedDragX < 0) -screenWidthPx else screenWidthPx
                                                 scope.launch {
+                                                    offsetAnimatable.snapTo(releaseOffset)
+                                                    isDirectDismissDragActive = false
                                                     offsetAnimatable.animateTo(
                                                         targetValue = targetDismissOffset,
                                                         animationSpec = tween(
@@ -969,6 +935,8 @@ fun UnifiedPlayerSheet(
                                                 }
                                             } else {
                                                 scope.launch {
+                                                    offsetAnimatable.snapTo(releaseOffset)
+                                                    isDirectDismissDragActive = false
                                                     offsetAnimatable.animateTo(
                                                         targetValue = 0f,
                                                         animationSpec = spring(
@@ -977,6 +945,20 @@ fun UnifiedPlayerSheet(
                                                         )
                                                     )
                                                 }
+                                            }
+                                        },
+                                        onDragCancel = {
+                                            val releaseOffset = directDismissDragOffset
+                                            scope.launch {
+                                                offsetAnimatable.snapTo(releaseOffset)
+                                                isDirectDismissDragActive = false
+                                                offsetAnimatable.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                                        stiffness = Spring.StiffnessMedium
+                                                    )
+                                                )
                                             }
                                         }
                                     )
@@ -990,9 +972,9 @@ fun UnifiedPlayerSheet(
                                 .fillMaxWidth()
                                 .then(dismissGestureModifier)
                                 .padding(horizontal = currentHorizontalPadding)
-                                .height(playerContentAreaHeightDp)
+                                .height(containerHeight)
                                 .graphicsLayer {
-                                    translationX = offsetAnimatable.value
+                                    translationX = visualDismissOffset
                                     scaleY = visualOvershootScaleY.value
                                     transformOrigin = TransformOrigin(0.5f, 1f)
                                 }
@@ -1038,32 +1020,26 @@ fun UnifiedPlayerSheet(
                                             initialFractionOnDragStart =
                                                 playerContentExpansionFraction.value
                                             initialYOnDragStart = currentSheetTranslationY.value
+                                            directExpansionFraction = initialFractionOnDragStart
+                                            directSheetTranslationY = initialYOnDragStart
                                             accumulatedDragYSinceStart = 0f
                                         },
                                         onVerticalDrag = { change, dragAmount ->
                                             change.consume()
                                             accumulatedDragYSinceStart += dragAmount
-                                            scope.launch {
-                                                val newY =
-                                                    (currentSheetTranslationY.value + dragAmount)
-                                                        .coerceIn(
-                                                            expandedY.value - miniH.value * 0.2f,
-                                                            collapsedY.value + miniH.value * 0.2f
-                                                        )
-                                                currentSheetTranslationY.snapTo(newY)
+                                            val newY =
+                                                ((directSheetTranslationY ?: initialYOnDragStart) + dragAmount)
+                                                    .coerceIn(
+                                                        expandedY.value - miniH.value * 0.2f,
+                                                        collapsedY.value + miniH.value * 0.2f
+                                                    )
+                                            directSheetTranslationY = newY
 
-                                                val denom =
-                                                    (collapsedY.value - expandedY.value).coerceAtLeast(
-                                                        1f
-                                                    )
-                                                val dragRatio = (initialYOnDragStart - newY) / denom
-                                                val newFraction =
-                                                    (initialFractionOnDragStart + dragRatio).coerceIn(
-                                                        0f,
-                                                        1f
-                                                    )
-                                                playerContentExpansionFraction.snapTo(newFraction)
-                                            }
+                                            val denom =
+                                                (collapsedY.value - expandedY.value).coerceAtLeast(1f)
+                                            val dragRatio = (initialYOnDragStart - newY) / denom
+                                            directExpansionFraction =
+                                                (initialFractionOnDragStart + dragRatio).coerceIn(0f, 1f)
                                             velocityTracker.addPosition(
                                                 change.uptimeMillis,
                                                 change.position
@@ -1075,8 +1051,10 @@ fun UnifiedPlayerSheet(
 
                                             val verticalVelocity =
                                                 velocityTracker.calculateVelocity().y
-                                            val currentFraction =
-                                                playerContentExpansionFraction.value
+                                            val releaseY = directSheetTranslationY
+                                                ?: currentSheetTranslationY.value
+                                            val currentFraction = directExpansionFraction
+                                                ?: playerContentExpansionFraction.value
                                             val minDragThresholdPx =
                                                 with(dens.value) { 5.dp.toPx() }
                                             val velocityThreshold = 150f
@@ -1094,6 +1072,12 @@ fun UnifiedPlayerSheet(
                                                 }
 
                                             scope.launch {
+                                                sheetAnimationMutex.mutate {
+                                                    currentSheetTranslationY.snapTo(releaseY)
+                                                    playerContentExpansionFraction.snapTo(currentFraction)
+                                                }
+                                                directSheetTranslationY = null
+                                                directExpansionFraction = null
                                                 if (targetState == PlayerSheetState.EXPANDED) {
                                                     launch { animatePlayerSheet(targetExpanded = true) }
                                                     playerViewModel.expandPlayerSheet()
@@ -1129,6 +1113,25 @@ fun UnifiedPlayerSheet(
                                                 }
                                             }
                                             accumulatedDragYSinceStart = 0f
+                                        },
+                                        onDragCancel = {
+                                            isDragging = false
+                                            isDraggingPlayerArea = false
+                                            val releaseY = directSheetTranslationY
+                                                ?: currentSheetTranslationY.value
+                                            val releaseFraction = directExpansionFraction
+                                                ?: playerContentExpansionFraction.value
+                                            scope.launch {
+                                                sheetAnimationMutex.mutate {
+                                                    currentSheetTranslationY.snapTo(releaseY)
+                                                    playerContentExpansionFraction.snapTo(releaseFraction)
+                                                }
+                                                directSheetTranslationY = null
+                                                directExpansionFraction = null
+                                                animatePlayerSheet(
+                                                    targetExpanded = currentSheetContentState == PlayerSheetState.EXPANDED
+                                                )
+                                            }
                                         }
                                     )
                                 }
@@ -1158,7 +1161,7 @@ fun UnifiedPlayerSheet(
                                                     .graphicsLayer {
                                                         alpha = miniAlpha
                                                     }
-                                                    .zIndex(if (playerContentExpansionFraction.value < 0.5f) 1f else 0f)
+                                                    .zIndex(if (renderedExpansionFraction < 0.5f) 1f else 0f)
                                             ) {
                                                 PlayerControls(
                                                     song = currentSongNonNull, // Use non-null version
@@ -1169,7 +1172,7 @@ fun UnifiedPlayerSheet(
                                                     onPlayPause = { playerViewModel.playPause() },
                                                     onPrevious = { playerViewModel.previousSong() },
                                                     onNext = { playerViewModel.nextSong() },
-                                                    modifier = Modifier.fillMaxSize()
+                                                    modifier = Modifier.fillMaxWidth()
                                                 )
                                             }
                                         }
@@ -1199,8 +1202,8 @@ fun UnifiedPlayerSheet(
                                                     scaleX = fullPlayerScale
                                                     scaleY = fullPlayerScale
                                                 }
-                                                .zIndex(if (playerContentExpansionFraction.value >= 0.5f) 1f else 0f)
-                                                .offset { if (playerContentExpansionFraction.value <= 0.01f) IntOffset(0, 10000) else IntOffset.Zero }
+                                                .zIndex(if (renderedExpansionFraction >= 0.5f) 1f else 0f)
+                                                .offset { if (renderedExpansionFraction <= 0.01f) IntOffset(0, 10000) else IntOffset.Zero }
                                         ) {
                                             FullPlayerContent(
                                                 currentSong = currentSongNonNull,
@@ -1208,7 +1211,7 @@ fun UnifiedPlayerSheet(
                                                 currentQueueSourceName = currentQueueSourceName,
                                                 isShuffleEnabled = stablePlayerState.isShuffleEnabled,
                                                 repeatMode = playerViewModel.visualRepeatMode.collectAsState().value,
-                                                expansionFractionProvider = { playerContentExpansionFraction.value },
+                                                expansionFractionProvider = { renderedExpansionFraction },
                                                 currentSheetState = currentSheetContentState,
                                                 carouselStyle = carouselStyle,
                                                 loadingTweaks = fullPlayerLoadingTweaks,
@@ -1360,7 +1363,7 @@ fun UnifiedPlayerSheet(
                                     .offset {
                                         IntOffset(
                                             x = 0,
-                                            y = queueSheetOffset.value.roundToInt()
+                                            y = renderedQueueSheetOffset.roundToInt()
                                         )
                                     }
                                     .graphicsLayer {

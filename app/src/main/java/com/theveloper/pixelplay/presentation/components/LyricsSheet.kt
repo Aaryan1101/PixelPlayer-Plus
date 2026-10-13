@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Lyrics
 import com.theveloper.pixelplay.data.model.SyncedLine
@@ -56,7 +57,6 @@ import com.theveloper.pixelplay.presentation.screens.TabAnimation
 import com.theveloper.pixelplay.presentation.components.subcomps.FetchLyricsDialog
 import com.theveloper.pixelplay.presentation.components.subcomps.PlayerSeekBar
 import com.theveloper.pixelplay.presentation.viewmodel.LyricsSearchUiState
-import com.theveloper.pixelplay.presentation.viewmodel.PlayerUiState
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import com.theveloper.pixelplay.utils.BubblesLine
@@ -82,7 +82,7 @@ import androidx.compose.material3.HorizontalDivider
 @Composable
 fun LyricsSheet(
     stablePlayerStateFlow: StateFlow<StablePlayerState>,
-    playerUiStateFlow: StateFlow<PlayerUiState>,
+    currentPositionFlow: StateFlow<Long>,
     lyricsSearchUiState: LyricsSearchUiState,
     resetLyricsForCurrentSong: () -> Unit,
     onSearchLyrics: (Boolean) -> Unit,
@@ -548,10 +548,10 @@ fun LyricsSheet(
     ) { paddingValues ->
         val syncedListState = rememberLazyListState()
         val staticListState = rememberLazyListState()
-        val playerUiState by playerUiStateFlow.collectAsState()
+        val currentPosition by currentPositionFlow.collectAsStateWithLifecycle()
         // Apply lyrics sync offset to the position flow
-        val positionFlow = remember(playerUiStateFlow, lyricsSyncOffset) {
-            playerUiStateFlow.map { (it.currentPosition + lyricsSyncOffset).coerceAtLeast(0L) }
+        val positionFlow = remember(currentPositionFlow, lyricsSyncOffset) {
+            currentPositionFlow.map { (it + lyricsSyncOffset).coerceAtLeast(0L) }
         }
 
         LaunchedEffect(lyrics) {
@@ -697,7 +697,7 @@ fun LyricsSheet(
                     backgroundColor = backgroundColor,
                     onBackgroundColor = onBackgroundColor,
                     primaryColor = accentColor,
-                    currentPosition = playerUiState.currentPosition,
+                    currentPosition = currentPosition,
                     totalDuration = stablePlayerState.totalDuration,
                     onSeek = onSeekTo,
                     isPlaying = isPlaying,

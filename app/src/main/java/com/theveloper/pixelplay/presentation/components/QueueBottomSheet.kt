@@ -91,7 +91,6 @@ import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -134,6 +133,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.HapticFeedbackConstantsCompat
 import androidx.core.view.ViewCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.R
@@ -222,15 +222,14 @@ fun QueueBottomSheet(
     var showClearQueueDialog by remember { mutableStateOf(false) }
     var isFabExpanded by rememberSaveable { mutableStateOf(false) }
 
-    val stablePlayerState by viewModel.stablePlayerState.collectAsState()
+    val currentSong by viewModel.currentSongState.collectAsStateWithLifecycle()
+    val isPlaying by viewModel.isPlayingState.collectAsStateWithLifecycle()
 
-    val albumColorSchemePair by viewModel.currentAlbumArtColorSchemePair.collectAsState()
+    val albumColorSchemePair by viewModel.currentAlbumArtColorSchemePair.collectAsStateWithLifecycle()
     val isDark = isSystemInDarkTheme()
     val albumColorScheme = remember(albumColorSchemePair, isDark) {
         albumColorSchemePair?.let { pair -> if (isDark) pair.dark else pair.light }
     }
-
-    val isPlaying = stablePlayerState.isPlaying
 
     val currentSongIndex = remember(queue, currentSongId) {
         queue.indexOfFirst { it.id == currentSongId }
@@ -243,7 +242,7 @@ fun QueueBottomSheet(
     )
 
     // Read show queue history preference
-    val settingsState by settingsViewModel.uiState.collectAsState()
+    val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val showQueueHistory = settingsState.showQueueHistory
 
     // Show full queue including history (Apple Music style) OR only from current song
@@ -500,7 +499,7 @@ fun QueueBottomSheet(
                     .asPaddingValues()
                     .calculateTopPadding() + 10.dp
 
-                stablePlayerState.currentSong?.let { nowPlaying ->
+                currentSong?.let { nowPlaying ->
                     QueueMiniPlayer(
                         song = nowPlaying,
                         isPlaying = isPlaying,
@@ -543,7 +542,7 @@ fun QueueBottomSheet(
                         .padding(
                             start = 12.dp,
                             end = 12.dp,
-                            top = if (stablePlayerState.currentSong == null) headerTopPadding else 2.dp,
+                            top = if (currentSong == null) headerTopPadding else 2.dp,
                             bottom = 12.dp,
                         )
                         .then(directSheetDragModifier),

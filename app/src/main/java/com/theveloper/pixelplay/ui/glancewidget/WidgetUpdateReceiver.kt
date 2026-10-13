@@ -16,7 +16,7 @@ class WidgetUpdateReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         Log.d(TAG, "onReceive: Received action: ${intent.action}")
-        if (intent.action == "com.example.pixelplay.ACTION_WIDGET_UPDATE_PLAYBACK_STATE") {
+        if (intent.action == "io.github.aaryan1101.pixelplayerplus.ACTION_WIDGET_UPDATE_PLAYBACK_STATE") {
             coroutineScope.launch {
                 try {
                     val glanceAppWidgetManager = GlanceAppWidgetManager(context)

@@ -3,11 +3,14 @@ package com.theveloper.pixelplay.data.worker
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
+import android.media.AudioManager
 import android.provider.MediaStore
 import android.util.Log
 import androidx.hilt.work.HiltWorker
 import android.os.Trace // Import Trace
 import androidx.work.CoroutineWorker
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -61,6 +64,12 @@ class SyncWorker @AssistedInject constructor(
             val syncModeName = inputData.getString(INPUT_SYNC_MODE) ?: SyncMode.INCREMENTAL.name
             val syncMode = SyncMode.valueOf(syncModeName)
             val forceMetadata = inputData.getBoolean(INPUT_FORCE_METADATA, false)
+            val deferDuringPlayback = inputData.getBoolean(INPUT_DEFER_DURING_PLAYBACK, false)
+            val audioManager = applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (deferDuringPlayback && audioManager.isMusicActive) {
+                Log.i(TAG, "Deferring optional library synchronization while audio is active")
+                return@withContext Result.retry()
+            }
             
             Log.i(TAG, "Starting MediaStore synchronization (Mode: $syncMode, ForceMetadata: $forceMetadata)...")
             val startTime = System.currentTimeMillis()
@@ -665,7 +674,7 @@ class SyncWorker @AssistedInject constructor(
 
         // Phase 2: Parallel processing of songs
         val processedCount = AtomicInteger(0)
-        val concurrencyLimit = 8 // Limit parallel operations to prevent resource exhaustion
+        val concurrencyLimit = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
         val semaphore = Semaphore(concurrencyLimit)
 
         val songs = coroutineScope {
@@ -773,10 +782,11 @@ class SyncWorker @AssistedInject constructor(
 
 
     companion object {
-        const val WORK_NAME = "com.theveloper.pixelplay.data.worker.SyncWorker"
+        const val WORK_NAME = "io.github.aaryan1101.pixelplayerplus.data.worker.SyncWorker"
         private const val TAG = "SyncWorker"
         const val INPUT_FORCE_METADATA = "input_force_metadata"
         const val INPUT_SYNC_MODE = "input_sync_mode"
+        const val INPUT_DEFER_DURING_PLAYBACK = "input_defer_during_playback"
 
         
         // Progress reporting constants
@@ -788,8 +798,11 @@ class SyncWorker @AssistedInject constructor(
         fun startUpSyncWork(deepScan: Boolean = false) = OneTimeWorkRequestBuilder<SyncWorker>()
             .setInputData(workDataOf(
                 INPUT_FORCE_METADATA to deepScan,
-                INPUT_SYNC_MODE to SyncMode.INCREMENTAL.name
+                INPUT_SYNC_MODE to SyncMode.INCREMENTAL.name,
+                INPUT_DEFER_DURING_PLAYBACK to true
             ))
+            .setConstraints(backgroundSyncConstraints())
+            .setBackoffCriteria(BackoffPolicy.LINEAR, 10, TimeUnit.MINUTES)
             .build()
 
         fun incrementalSyncWork() = OneTimeWorkRequestBuilder<SyncWorker>()
@@ -803,9 +816,22 @@ class SyncWorker @AssistedInject constructor(
             ))
             .build()
 
-        fun rebuildDatabaseWork() = OneTimeWorkRequestBuilder<SyncWorker>()
-            .setInputData(workDataOf(INPUT_SYNC_MODE to SyncMode.REBUILD.name))
+        fun rebuildDatabaseWork(applyBackgroundConstraints: Boolean = false) = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setInputData(workDataOf(
+                INPUT_SYNC_MODE to SyncMode.REBUILD.name,
+                INPUT_DEFER_DURING_PLAYBACK to applyBackgroundConstraints
+            ))
+            .apply {
+                if (applyBackgroundConstraints) {
+                    setConstraints(backgroundSyncConstraints())
+                    setBackoffCriteria(BackoffPolicy.LINEAR, 10, TimeUnit.MINUTES)
+                }
+            }
+            .build()
+
+        private fun backgroundSyncConstraints(): Constraints = Constraints.Builder()
+            .setRequiresBatteryNotLow(true)
+            .setRequiresStorageNotLow(true)
             .build()
     }
 }
-

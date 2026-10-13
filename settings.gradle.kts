@@ -16,6 +16,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = java.net.URI("https://maven.lavalink.dev/releases") }
         maven { url = java.net.URI("https://jitpack.io") } // Usa java.net.URI
     }
 }
@@ -24,3 +25,4 @@ rootProject.name = "PixelPlay"
 include(":app")
 include(":baselineprofile")
 include(":desktopApp")
+include(":discordBot")

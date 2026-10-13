@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.util.lerp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.net.toUri
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
@@ -272,8 +273,7 @@ fun AboutScreen(
     }
 
     var showBrickBreaker by remember { mutableStateOf(false) }
-    val stablePlayerState by viewModel.stablePlayerState.collectAsState()
-    val currentSong = stablePlayerState.currentSong
+    val hasCurrentSong by viewModel.hasCurrentSong.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -444,7 +444,7 @@ fun AboutScreen(
         if (showBrickBreaker) {
             BackHandler { showBrickBreaker = false }
             BrickBreakerOverlay(
-                isMiniPlayerVisible = currentSong != null,
+                isMiniPlayerVisible = hasCurrentSong,
                 onPlayRandom = { viewModel.playRandomSong() },
                 onClose = { showBrickBreaker = false }
             )

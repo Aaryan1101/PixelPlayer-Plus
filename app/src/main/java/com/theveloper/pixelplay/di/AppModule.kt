@@ -10,10 +10,13 @@ import androidx.room.Room
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.theveloper.pixelplay.BuildConfig
 import com.theveloper.pixelplay.PixelPlayApplication
 import com.theveloper.pixelplay.data.database.AlbumArtThemeDao
+import com.theveloper.pixelplay.data.database.EngagementDao
 import com.theveloper.pixelplay.data.database.MusicDao
 import com.theveloper.pixelplay.data.database.PixelPlayDatabase
+import com.theveloper.pixelplay.data.database.PlaylistDao
 import com.theveloper.pixelplay.data.database.SearchHistoryDao
 import com.theveloper.pixelplay.data.database.TransitionDao
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
@@ -77,19 +80,34 @@ object AppModule {
     @Singleton
     @Provides
     fun providePixelPlayDatabase(@ApplicationContext context: Context): PixelPlayDatabase {
-        return Room.databaseBuilder(
+        val builder = Room.databaseBuilder(
             context.applicationContext,
             PixelPlayDatabase::class.java,
             "pixelplay_database"
         ).addMigrations(
             PixelPlayDatabase.MIGRATION_3_4,
             PixelPlayDatabase.MIGRATION_4_5,
+            PixelPlayDatabase.MIGRATION_5_6,
             PixelPlayDatabase.MIGRATION_6_7,
+            PixelPlayDatabase.MIGRATION_7_8,
+            PixelPlayDatabase.MIGRATION_8_9,
             PixelPlayDatabase.MIGRATION_9_10,
-            PixelPlayDatabase.MIGRATION_10_11
+            PixelPlayDatabase.MIGRATION_10_11,
+            PixelPlayDatabase.MIGRATION_11_12,
+            PixelPlayDatabase.MIGRATION_12_13,
+            PixelPlayDatabase.MIGRATION_13_14,
+            PixelPlayDatabase.MIGRATION_14_15
         )
-            .fallbackToDestructiveMigration(dropAllTables = true)
-            .build()
+            .addCallback(PixelPlayDatabase.createSearchIndexCallback())
+
+        // Never erase a user's library, playlists, or history to recover from a
+        // missing migration in production. Debug builds retain the fallback until
+        // the historical migration gaps are reconstructed and tested.
+        if (BuildConfig.DEBUG) {
+            builder.fallbackToDestructiveMigration(dropAllTables = true)
+        }
+
+        return builder.build()
     }
 
     @Singleton
@@ -116,6 +134,18 @@ object AppModule {
         return database.transitionDao()
     }
 
+    @Singleton
+    @Provides
+    fun providePlaylistDao(database: PixelPlayDatabase): PlaylistDao {
+        return database.playlistDao()
+    }
+
+    @Singleton
+    @Provides
+    fun provideEngagementDao(database: PixelPlayDatabase): EngagementDao {
+        return database.engagementDao()
+    }
+
     @Provides
     @Singleton
     fun provideImageLoader(
@@ -126,7 +156,7 @@ object AppModule {
             .allowHardware(true) // Re-enable hardware bitmaps for better performance
             .memoryCache {
                 MemoryCache.Builder(context)
-                    .maxSizePercent(0.20) // Use 20% of app memory for image cache
+                    .maxSizePercent(0.15) // Leave more heap headroom on 8 GB and low-RAM devices
                     .build()
             }
             .diskCache {
@@ -192,8 +222,13 @@ object AppModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(): OkHttpClient {
-        val loggingInterceptor = HttpLoggingInterceptor()
-        loggingInterceptor.setLevel(HttpLoggingInterceptor.Level.BODY)
+        val loggingInterceptor = HttpLoggingInterceptor().apply {
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.BODY
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
+        }
         
         // Connection pool with limited connections to avoid overwhelming servers
         val connectionPool = okhttp3.ConnectionPool(
@@ -253,8 +288,13 @@ object AppModule {
     @Singleton
     @FastOkHttpClient
     fun provideFastOkHttpClient(): OkHttpClient {
-        val loggingInterceptor = HttpLoggingInterceptor()
-        loggingInterceptor.setLevel(HttpLoggingInterceptor.Level.HEADERS)
+        val loggingInterceptor = HttpLoggingInterceptor().apply {
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.HEADERS
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
+        }
         
         // Connection pool to reuse connections
         val connectionPool = okhttp3.ConnectionPool(
@@ -390,8 +430,8 @@ object AppModule {
      */
     @Provides
     @Singleton
-    fun provideYouTubeExtractorService(): YouTubeExtractorService {
-        return YouTubeExtractorService()
+    fun provideYouTubeExtractorService(pipedApiService: PipedApiService): YouTubeExtractorService {
+        return YouTubeExtractorService(pipedApiService)
     }
 
     /**

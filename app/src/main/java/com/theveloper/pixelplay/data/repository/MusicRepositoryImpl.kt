@@ -74,6 +74,10 @@ class MusicRepositoryImpl @Inject constructor(
     private val lyricsRepository: LyricsRepository
 ) : MusicRepository {
 
+    private companion object {
+        const val SEARCH_RESULTS_LIMIT = 20
+    }
+
     private val directoryScanMutex = Mutex()
 
     private data class DirectoryFilterConfig(
@@ -308,66 +312,97 @@ class MusicRepositoryImpl @Inject constructor(
 
     override fun searchSongs(query: String): Flow<List<Song>> {
         if (query.isBlank()) return flowOf(emptyList())
-        return combine(
+        return directoryFilterConfig.flatMapLatest { config ->
             musicDao.searchSongs(
                 query = query,
                 allowedParentDirs = emptyList(),
-                applyDirectoryFilter = false
-            ),
-            directoryFilterConfig,
-            allArtistsFlow,
-            allCrossRefsFlow
-        ) { songs, config, artists, crossRefs ->
-            mapSongList(songs, config, artists, crossRefs)
+                applyDirectoryFilter = false,
+                limit = config.databaseSearchLimit()
+            ).flatMapLatest { matches ->
+                val allowedMatches = matches.filterBlocked(config).take(SEARCH_RESULTS_LIMIT)
+                if (allowedMatches.isEmpty()) {
+                    flowOf(emptyList())
+                } else {
+                    val songIds = allowedMatches.map { it.id }
+                    combine(
+                        musicDao.getArtistsForSongs(songIds),
+                        musicDao.getCrossRefsForSongs(songIds)
+                    ) { artists, crossRefs ->
+                        mapSongList(allowedMatches, null, artists, crossRefs)
+                    }
+                }
+            }
         }.conflate().flowOn(Dispatchers.IO)
     }
 
 
     override fun searchAlbums(query: String): Flow<List<Album>> {
         if (query.isBlank()) return flowOf(emptyList())
-        return combine(
+        return directoryFilterConfig.flatMapLatest { config ->
             musicDao.searchAlbums(
                 query = query,
                 allowedParentDirs = emptyList(),
-                applyDirectoryFilter = false
-            ),
-            permittedSongsFlow,
-            directoryFilterConfig
-        ) { albums, allowedSongs, _ ->
-            val allowedAlbumIds = allowedSongs.map { it.albumId }.toSet()
-            albums.filter { allowedAlbumIds.contains(it.id) }
-                .map { it.toAlbum() }
+                applyDirectoryFilter = false,
+                limit = config.databaseSearchLimit()
+            ).flatMapLatest { matches ->
+                if (matches.isEmpty()) {
+                    flowOf(emptyList())
+                } else {
+                    musicDao.getSongsForAlbums(matches.map { it.id }).map { candidateSongs ->
+                        val allowedAlbumIds = candidateSongs
+                            .filterBlocked(config)
+                            .mapTo(mutableSetOf()) { it.albumId }
+                        matches.asSequence()
+                            .filter { allowedAlbumIds.contains(it.id) }
+                            .take(SEARCH_RESULTS_LIMIT)
+                            .map { it.toAlbum() }
+                            .toList()
+                    }
+                }
+            }
         }.conflate().flowOn(Dispatchers.IO)
     }
 
     override fun searchArtists(query: String): Flow<List<Artist>> {
         if (query.isBlank()) return flowOf(emptyList())
-        return combine(
+        return directoryFilterConfig.flatMapLatest { config ->
             musicDao.searchArtists(
                 query = query,
                 allowedParentDirs = emptyList(),
-                applyDirectoryFilter = false
-            ),
-            permittedSongsFlow,
-            directoryFilterConfig,
-            allCrossRefsFlow
-        ) { artists, allowedSongs, _, crossRefs ->
-            val allowedSongIds = allowedSongs.map { it.id }.toSet()
-            val allowedCrossRefs = crossRefs.filterBySongs(allowedSongIds)
-            val allowedArtistIds = allowedCrossRefs.map { it.artistId }.toMutableSet()
-            allowedArtistIds.addAll(allowedSongs.map { it.artistId })
+                applyDirectoryFilter = false,
+                limit = config.databaseSearchLimit()
+            ).flatMapLatest { matches ->
+                if (matches.isEmpty()) {
+                    flowOf(emptyList())
+                } else {
+                    combine(
+                        musicDao.getSongsForArtists(matches.map { it.id }),
+                        musicDao.getCrossRefsForArtists(matches.map { it.id })
+                    ) { candidateSongs, crossRefs ->
+                        val allowedSongs = candidateSongs.filterBlocked(config)
+                        val allowedSongIds = allowedSongs.map { it.id }.toSet()
+                        val allowedCrossRefs = crossRefs.filterBySongs(allowedSongIds)
+                        val allowedArtistIds = allowedCrossRefs
+                            .mapTo(mutableSetOf()) { it.artistId }
+                        allowedArtistIds.addAll(allowedSongs.map { it.artistId })
 
-            artists.filter { allowedArtistIds.contains(it.id) }
-                .map { it.toArtist() }
+                        matches.asSequence()
+                            .filter { allowedArtistIds.contains(it.id) }
+                            .take(SEARCH_RESULTS_LIMIT)
+                            .map { it.toArtist() }
+                            .toList()
+                    }
+                }
+            }
         }.conflate().flowOn(Dispatchers.IO)
     }
 
+    private fun DirectoryFilterConfig.databaseSearchLimit(): Int =
+        if (isFilterActive) Int.MAX_VALUE else SEARCH_RESULTS_LIMIT
+
     override suspend fun searchPlaylists(query: String): List<Playlist> {
         if (query.isBlank()) return emptyList()
-        return userPreferencesRepository.userPlaylistsFlow.first()
-            .filter { playlist ->
-                playlist.name.contains(query, ignoreCase = true)
-            }
+        return userPreferencesRepository.searchUserPlaylists(query, SEARCH_RESULTS_LIMIT)
     }
 
     override fun searchAll(query: String, filterType: SearchFilterType): Flow<List<SearchResultItem>> {
@@ -382,11 +417,23 @@ class MusicRepositoryImpl @Inject constructor(
                     searchArtists(query),
                     playlistsFlow
                 ) { songs, albums, artists, playlists ->
-                    mutableListOf<SearchResultItem>().apply {
-                        songs.forEach { add(SearchResultItem.SongItem(it)) }
-                        albums.forEach { add(SearchResultItem.AlbumItem(it)) }
-                        artists.forEach { add(SearchResultItem.ArtistItem(it)) }
-                        playlists.forEach { add(SearchResultItem.PlaylistItem(it)) }
+                    buildList(SEARCH_RESULTS_LIMIT) {
+                        songs.forEach {
+                            if (size == SEARCH_RESULTS_LIMIT) return@buildList
+                            add(SearchResultItem.SongItem(it))
+                        }
+                        albums.forEach {
+                            if (size == SEARCH_RESULTS_LIMIT) return@buildList
+                            add(SearchResultItem.AlbumItem(it))
+                        }
+                        artists.forEach {
+                            if (size == SEARCH_RESULTS_LIMIT) return@buildList
+                            add(SearchResultItem.ArtistItem(it))
+                        }
+                        playlists.forEach {
+                            if (size == SEARCH_RESULTS_LIMIT) return@buildList
+                            add(SearchResultItem.PlaylistItem(it))
+                        }
                     }
                 }
             }

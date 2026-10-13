@@ -814,7 +814,7 @@ fun FullPlayerContent(
     ) {
         LyricsSheet(
             stablePlayerStateFlow = playerViewModel.stablePlayerState,
-            playerUiStateFlow = playerViewModel.playerUiState,
+            currentPositionFlow = playerViewModel.currentPosition,
             lyricsSearchUiState = lyricsSearchUiState,
             resetLyricsForCurrentSong = {
                 showLyricsSheet = false

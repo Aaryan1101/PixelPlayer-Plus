@@ -7,6 +7,8 @@ import com.theveloper.pixelplay.desktop.model.ListeningHistoryEntry
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class DesktopPreferencesStoreTest {
     @Test
@@ -41,6 +43,10 @@ class DesktopPreferencesStoreTest {
             ),
             volume = 41,
             lastSongPath = "/music/one/favorite.flac",
+            notificationsEnabled = false,
+            nowPlayingNotifications = true,
+            backgroundNotifications = false,
+            closeToTray = false,
         )
 
         store.save(preferences)
@@ -55,5 +61,30 @@ class DesktopPreferencesStoreTest {
         file.toFile().writeText("not-json")
 
         assertEquals(DesktopPreferences(), DesktopPreferencesStore(file).load())
+    }
+
+    @Test
+    fun `preferences saved before notification settings use safe defaults`() {
+        val directory = createTempDirectory("pixelplayer-legacy-preferences-test")
+        val file = directory.resolve("preferences.json")
+        file.toFile().writeText(
+            """
+            {
+              "libraryFolders": [],
+              "favoritePaths": [],
+              "favoriteSongs": [],
+              "playlists": [],
+              "listeningHistory": [],
+              "volume": 72
+            }
+            """.trimIndent(),
+        )
+
+        val preferences = DesktopPreferencesStore(file).load()
+
+        assertTrue(preferences.notificationsEnabled)
+        assertFalse(preferences.nowPlayingNotifications)
+        assertTrue(preferences.backgroundNotifications)
+        assertTrue(preferences.closeToTray)
     }
 }

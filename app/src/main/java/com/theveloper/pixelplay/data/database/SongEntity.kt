@@ -18,7 +18,8 @@ import com.theveloper.pixelplay.utils.normalizeMetadataTextOrEmpty
         Index(value = ["artist_id"], unique = false),
         Index(value = ["artist_name"], unique = false), // Nuevo índice para búsquedas por nombre de artista
         Index(value = ["genre"], unique = false),
-        Index(value = ["parent_directory_path"], unique = false) // Índice para filtrado por directorio
+        Index(value = ["parent_directory_path"], unique = false), // Índice para filtrado por directorio
+        Index(value = ["file_path"], unique = false)
     ],
     foreignKeys = [
         ForeignKey(

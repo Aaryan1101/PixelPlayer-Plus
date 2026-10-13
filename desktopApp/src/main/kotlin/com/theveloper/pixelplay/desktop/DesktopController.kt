@@ -29,6 +29,7 @@ import java.io.Closeable
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class DesktopUiState(
     val destination: DesktopDestination = DesktopDestination.HOME,
@@ -53,6 +54,10 @@ data class DesktopUiState(
     val statusMessage: String? = null,
     val isShuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
+    val notificationsEnabled: Boolean = true,
+    val nowPlayingNotifications: Boolean = false,
+    val backgroundNotifications: Boolean = true,
+    val closeToTray: Boolean = true,
 )
 
 enum class RepeatMode { OFF, ALL, ONE }
@@ -65,6 +70,7 @@ class DesktopController(
     private val onRequestQuit: () -> Unit = {},
 ) : Closeable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val isClosed = AtomicBoolean(false)
     private var preferences = preferencesStore.load()
     private val playerEngine = MpvPlayerEngine(onTrackEnded = { scope.launch { playNext(fromTrackEnd = true) } })
     private val mprisService = MprisService(
@@ -91,6 +97,10 @@ class DesktopController(
             listeningHistory = preferences.listeningHistory,
             libraryFolders = initialFolders(preferences.libraryFolders),
             player = PlayerSnapshot(volume = preferences.volume),
+            notificationsEnabled = preferences.notificationsEnabled,
+            nowPlayingNotifications = preferences.nowPlayingNotifications,
+            backgroundNotifications = preferences.backgroundNotifications,
+            closeToTray = preferences.closeToTray,
         ),
     )
     val state: StateFlow<DesktopUiState> = _state.asStateFlow()
@@ -281,7 +291,7 @@ class DesktopController(
             playerEngine.load(song.path, song.title)
             playerEngine.setPaused(false)
             recordPlay(song)
-            DesktopNotifier.showNowPlaying(song)
+            notifyNowPlayingIfEnabled(song)
         } else {
             _state.update { it.copy(statusMessage = "Connecting to ${song.title}…") }
             scope.launch {
@@ -290,7 +300,7 @@ class DesktopController(
                         playerEngine.load(playback.audioUrl, song.title)
                         playerEngine.setPaused(false)
                         recordPlay(song)
-                        DesktopNotifier.showNowPlaying(song)
+                        notifyNowPlayingIfEnabled(song)
                         val recommendations = rankRecommendations(song, playback.relatedSongs)
                         _state.update { current ->
                             if (current.player.currentSong?.id != song.id) current else {
@@ -412,6 +422,26 @@ class DesktopController(
         }
     }
 
+    fun setNotificationsEnabled(enabled: Boolean) {
+        _state.update { it.copy(notificationsEnabled = enabled) }
+        persist { copy(notificationsEnabled = enabled) }
+    }
+
+    fun setNowPlayingNotifications(enabled: Boolean) {
+        _state.update { it.copy(nowPlayingNotifications = enabled) }
+        persist { copy(nowPlayingNotifications = enabled) }
+    }
+
+    fun setBackgroundNotifications(enabled: Boolean) {
+        _state.update { it.copy(backgroundNotifications = enabled) }
+        persist { copy(backgroundNotifications = enabled) }
+    }
+
+    fun setCloseToTray(enabled: Boolean) {
+        _state.update { it.copy(closeToTray = enabled) }
+        persist { copy(closeToTray = enabled) }
+    }
+
     fun createPlaylist(name: String) {
         val cleanName = name.trim()
         if (cleanName.isEmpty()) return
@@ -461,6 +491,13 @@ class DesktopController(
         preferences = preferences.copy(listeningHistory = history)
         _state.update { it.copy(listeningHistory = history) }
         persistNow()
+    }
+
+    private fun notifyNowPlayingIfEnabled(song: DesktopSong) {
+        val current = _state.value
+        if (current.notificationsEnabled && current.nowPlayingNotifications) {
+            DesktopNotifier.showNowPlaying(song)
+        }
     }
 
     private fun rankRecommendations(seed: DesktopSong, candidates: List<DesktopSong>): List<DesktopSong> {
@@ -520,6 +557,7 @@ class DesktopController(
     }
 
     override fun close() {
+        if (!isClosed.compareAndSet(false, true)) return
         onlineSearchJob?.cancel()
         mprisService.close()
         playerEngine.close()

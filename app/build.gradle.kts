@@ -9,6 +9,10 @@ plugins {
     // id("com.google.protobuf") version "0.9.5" // Eliminado plugin de Protobuf
 }
 
+val composeReportsEnabled = providers.gradleProperty("composeReports")
+    .map { it.toBoolean() }
+    .orElse(false)
+
 android {
     namespace = "com.theveloper.pixelplay"
     compileSdk = 35
@@ -30,7 +34,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.theveloper.pixelplay"
+        applicationId = "io.github.aaryan1101.pixelplayerplus"
         minSdk = 28
         targetSdk = 35
         versionCode = (project.findProperty("APP_VERSION_CODE") as String).toInt()
@@ -73,15 +77,16 @@ android {
     }
     kotlinOptions {
         jvmTarget = "11"
-        // Aquí es donde debes agregar freeCompilerArgs para los informes del compilador de Compose.
-        freeCompilerArgs += listOf(
-            "-P",
-            "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=${project.buildDir.absolutePath}/compose_compiler_reports"
-        )
-        freeCompilerArgs += listOf(
-            "-P",
-            "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=${project.buildDir.absolutePath}/compose_compiler_metrics"
-        )
+        if (composeReportsEnabled.get()) {
+            freeCompilerArgs += listOf(
+                "-P",
+                "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=${layout.buildDirectory.dir("compose_compiler_reports").get().asFile.absolutePath}"
+            )
+            freeCompilerArgs += listOf(
+                "-P",
+                "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=${layout.buildDirectory.dir("compose_compiler_metrics").get().asFile.absolutePath}"
+            )
+        }
 
         //Stability
         freeCompilerArgs += listOf(
@@ -104,6 +109,11 @@ android {
     }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+    arg("room.incremental", "true")
+}
+
 dependencies {
     implementation(libs.androidx.profileinstaller)
     "baselineProfile"(project(":baselineprofile"))
@@ -111,6 +121,7 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
@@ -131,9 +142,9 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
 
     // Baseline Profiles (Macrobenchmark)
-    androidTestImplementation("androidx.benchmark:benchmark-macro-junit4:1.2.4")
-    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
-    androidTestImplementation("androidx.benchmark:benchmark-junit4:1.2.4")
+    androidTestImplementation(libs.androidx.benchmark.macro.junit4)
+    androidTestImplementation(libs.androidx.uiautomator)
+    androidTestImplementation(libs.androidx.benchmark.junit4)
     
     // Testing dependencies
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
@@ -164,6 +175,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.room.ktx)
+    androidTestImplementation("androidx.room:room-testing:2.7.1")
 
     // Glance
     implementation(libs.androidx.glance)
@@ -308,5 +320,3 @@ dependencies {
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
 
 }
-
-

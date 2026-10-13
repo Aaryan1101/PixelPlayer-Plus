@@ -135,9 +135,10 @@ class SetupViewModel @Inject constructor(
 
     fun explorerRoot(): File = fileExplorerStateHolder.rootDirectory()
 
-    fun setSetupComplete() {
+    fun setSetupComplete(onComplete: () -> Unit) {
         viewModelScope.launch {
             userPreferencesRepository.setInitialSetupDone(true)
+            onComplete()
             // Use fullSync which bypasses MIN_SYNC_INTERVAL check and uses FULL mode
             syncManager.fullSync()
         }

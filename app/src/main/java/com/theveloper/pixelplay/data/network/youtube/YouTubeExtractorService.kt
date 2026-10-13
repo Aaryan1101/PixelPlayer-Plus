@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.data.network.youtube
 
+import com.theveloper.pixelplay.data.network.piped.PipedApiService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -14,9 +15,12 @@ import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQu
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.random.Random
 
 @Singleton
-class YouTubeExtractorService @Inject constructor() {
+class YouTubeExtractorService @Inject constructor(
+    private val pipedApiService: PipedApiService
+) {
 
     private val youtubeService = ServiceList.YouTube
     private var lastReinitTime = 0L
@@ -191,9 +195,9 @@ suspend fun getStreamInfo(videoUrl: String): Result<StreamExtractor> = withConte
                     lastError = error ?: Exception("Failed to get stream info")
                     Timber.w("YouTubeExtractor: Attempt ${attempt + 1} failed", lastError)
                     
-                    // Wait before retry (exponential backoff)
+                    // Bounded exponential backoff with jitter avoids synchronized retry bursts.
                     if (attempt < maxRetries - 1) {
-                        delay(1000L * (attempt + 1)) // 1s, 2s, 3s delays
+                        delay((500L shl attempt) + Random.nextLong(0L, 251L))
                     }
                     return@repeat
                 }
@@ -261,10 +265,30 @@ suspend fun getStreamInfo(videoUrl: String): Result<StreamExtractor> = withConte
                 lastError = e
                 Timber.e(e, "YouTubeExtractor: Attempt ${attempt + 1} failed for: $videoUrl")
                 
-                // Wait before retry (exponential backoff)
+                // Bounded exponential backoff with jitter avoids synchronized retry bursts.
                 if (attempt < maxRetries - 1) {
-                    delay(1000L * (attempt + 1)) // 1s, 2s, 3s delays
+                    delay((500L shl attempt) + Random.nextLong(0L, 251L))
                 }
+            }
+        }
+
+        // Piped is a separate extraction backend, not another NewPipe attempt.
+        val pipedVideoId = normalizeVideoId(videoUrl)
+        if (pipedVideoId != null) {
+            try {
+                val pipedStream = pipedApiService.getStreams(pipedVideoId)
+                    ?.audioStreams
+                    ?.asSequence()
+                    ?.filter { it.url.isNotBlank() && !it.videoOnly }
+                    ?.maxByOrNull { it.bitrate ?: 0 }
+                if (pipedStream != null) {
+                    Timber.d("YouTubeExtractor: Piped fallback succeeded")
+                    return@withContext Result.success(pipedStream.url)
+                }
+                Timber.w("YouTubeExtractor: Piped fallback returned no audio streams")
+            } catch (e: Exception) {
+                lastError = e
+                Timber.w(e, "YouTubeExtractor: Piped fallback failed")
             }
         }
         
@@ -292,6 +316,14 @@ suspend fun getStreamInfo(videoUrl: String): Result<StreamExtractor> = withConte
         // All methods failed
         Timber.e("YouTubeExtractor: All extraction methods failed for: $videoUrl", lastError)
         Result.failure(lastError ?: Exception("All extraction methods failed"))
+    }
+
+    private fun normalizeVideoId(videoUrl: String): String? = when {
+        videoUrl.matches(Regex("[A-Za-z0-9_-]{11}")) -> videoUrl
+        videoUrl.startsWith("youtube_") -> videoUrl.removePrefix("youtube_").takeIf { it.length == 11 }
+        "youtube.com/watch" in videoUrl -> videoUrl.substringAfter("v=").substringBefore('&').takeIf { it.length == 11 }
+        "youtu.be/" in videoUrl -> videoUrl.substringAfter("youtu.be/").substringBefore('?').takeIf { it.length == 11 }
+        else -> null
     }
 
     /**

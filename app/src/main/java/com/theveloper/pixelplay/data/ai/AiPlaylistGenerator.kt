@@ -64,10 +64,10 @@ class AiPlaylistGenerator @Inject constructor(
             // To optimize cost, cap the context size and shuffle it a bit for diversity
             val sampleSize = max(minLength, 80).coerceAtMost(200)
             val songSample = samplingPool.shuffled().take(sampleSize)
+            val engagementStats = dailyMixManager.getAllEngagementStats()
 
             val availableSongsJson = songSample.joinToString(separator = ",\n") { song ->
-                // Calculate score for each song. This might be slow if it's a real-time calculation.
-                val score = dailyMixManager.getScore(song.id)
+                val score = engagementStats[song.id]?.playCount ?: 0
                 """
                 {
                     "id": "${song.id}",

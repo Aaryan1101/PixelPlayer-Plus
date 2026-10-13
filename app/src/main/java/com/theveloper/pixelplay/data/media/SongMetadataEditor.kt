@@ -11,7 +11,6 @@ import androidx.core.net.toUri
 import com.kyant.taglib.Picture
 import com.kyant.taglib.TagLib
 import com.theveloper.pixelplay.data.database.MusicDao
-import kotlinx.coroutines.runBlocking
 import org.gagravarr.opus.OpusFile
 import org.gagravarr.opus.OpusTags
 import timber.log.Timber
@@ -27,7 +26,7 @@ class SongMetadataEditor(private val context: Context, private val musicDao: Mus
     // File extensions that require VorbisJava (TagLib has issues with these via file descriptors)
     private val opusExtensions = setOf("opus", "ogg")
 
-    fun editSongMetadata(
+    suspend fun editSongMetadata(
         songId: Long,
         newTitle: String,
         newArtist: String,
@@ -100,22 +99,20 @@ class SongMetadataEditor(private val context: Context, private val musicDao: Mus
 
             // 3. Update local database and save cover art preview
             var storedCoverArtUri: String? = null
-            runBlocking {
-                musicDao.updateSongMetadata(
-                    songId,
-                    newTitle,
-                    newArtist,
-                    newAlbum,
-                    normalizedGenre,
-                    normalizedLyrics,
-                    newTrackNumber
-                )
+            musicDao.updateSongMetadata(
+                songId,
+                newTitle,
+                newArtist,
+                newAlbum,
+                normalizedGenre,
+                normalizedLyrics,
+                newTrackNumber
+            )
 
-                coverArtUpdate?.let { update ->
-                    storedCoverArtUri = saveCoverArtPreview(songId, update)
-                    storedCoverArtUri?.let { coverUri ->
-                        musicDao.updateSongAlbumArt(songId, coverUri)
-                    }
+            coverArtUpdate?.let { update ->
+                storedCoverArtUri = saveCoverArtPreview(songId, update)
+                storedCoverArtUri?.let { coverUri ->
+                    musicDao.updateSongAlbumArt(songId, coverUri)
                 }
             }
 

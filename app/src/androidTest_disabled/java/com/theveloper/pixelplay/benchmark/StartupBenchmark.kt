@@ -14,7 +14,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-private const val PACKAGE_NAME = "com.theveloper.pixelplay"
+private const val PACKAGE_NAME = "io.github.aaryan1101.pixelplayerplus"
 private const val ITERATIONS = 5
 private const val STARTUP_TIMEOUT_MS = 15_000L
 

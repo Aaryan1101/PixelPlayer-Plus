@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-13
+
+### Added
+- Online music discovery categories on Android, including Punjabi, Bollywood, Hindi, trending, chill, and workout searches
+- Persistent online favourites and mixed local/online library support
+- Desktop settings for notification preferences
+- Native desktop tray controls for opening, controlling, restarting, and fully quitting PixelPlayer
+- Optional Discord music bot source with slash commands, queues, and recommendation-based autoplay
+- Unified purple PixelPlayer+ branding across Android and Linux desktop packages
+
+### Changed
+- Replaced the Android home mix banner with useful online discovery categories
+- Search categories now load online music instead of grouping local files by metadata genres
+- Refined Android startup, artwork loading, recently played data, and playback state handling
+- Redesigned the desktop home experience and tray menu
+- Changed the Android application ID to `io.github.aaryan1101.pixelplayerplus`
+
+### Fixed
+- Welcome/setup screen now appears only on a fresh installation
+- Setup completion is persisted before entering the Android app
+- Corrected the cramped "Welcome to" heading on the setup screen
+- Removed the Beta information button that linked to the upstream project rather than PixelPlayer+
+- Fixed online songs not appearing in Favourites after tapping the heart button
+- Improved desktop background exit behavior and notification controls
+
 ## [0.4.5-beta] - 2025-12-22
 
 ### Added

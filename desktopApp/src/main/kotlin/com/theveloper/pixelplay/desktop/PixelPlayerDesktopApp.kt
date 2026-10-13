@@ -66,6 +66,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
@@ -85,6 +86,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Typography
@@ -145,6 +147,73 @@ private val RaisedPanel = Color(0xFF1A1A1E)
 private val SoftText = Color(0xFFA7A7AD)
 private val Divider = Color(0xFF27272B)
 private val artworkCache = ConcurrentHashMap<String, ImageBitmap>()
+
+private data class DesktopExploreCategory(
+    val title: String,
+    val subtitle: String,
+    val query: String,
+    val icon: ImageVector,
+    val colors: List<Color>,
+)
+
+private val desktopExploreCategories = listOf(
+    DesktopExploreCategory(
+        "Trending",
+        "Popular right now",
+        "trending songs latest official audio",
+        Icons.Rounded.PlayArrow,
+        listOf(Color(0xFF7B2CBF), Color(0xFF3C096C)),
+    ),
+    DesktopExploreCategory(
+        "New releases",
+        "Fresh music",
+        "new music releases latest official audio",
+        Icons.Rounded.MusicNote,
+        listOf(Color(0xFF00796B), Color(0xFF004D40)),
+    ),
+    DesktopExploreCategory(
+        "Punjabi",
+        "Latest Punjabi hits",
+        "latest Punjabi songs official audio",
+        Icons.Rounded.QueueMusic,
+        listOf(Color(0xFFE65100), Color(0xFF8C2500)),
+    ),
+    DesktopExploreCategory(
+        "Bollywood",
+        "New and popular",
+        "latest Bollywood songs official audio",
+        Icons.Rounded.PlaylistAdd,
+        listOf(Color(0xFFC62828), Color(0xFF6F1010)),
+    ),
+    DesktopExploreCategory(
+        "Hindi hits",
+        "Songs you know",
+        "Hindi hit songs official audio",
+        Icons.Rounded.Favorite,
+        listOf(Color(0xFFAD1457), Color(0xFF5F0A30)),
+    ),
+    DesktopExploreCategory(
+        "Chill",
+        "Slow the room down",
+        "chill songs playlist official audio",
+        Icons.Rounded.Shuffle,
+        listOf(Color(0xFF00838F), Color(0xFF004D57)),
+    ),
+    DesktopExploreCategory(
+        "Workout",
+        "High-energy tracks",
+        "workout songs high energy official audio",
+        Icons.Rounded.SkipNext,
+        listOf(Color(0xFFEF6C00), Color(0xFF9A3800)),
+    ),
+    DesktopExploreCategory(
+        "Pop",
+        "Big hooks and hits",
+        "pop hit songs official audio",
+        Icons.Rounded.MusicNote,
+        listOf(Color(0xFF1565C0), Color(0xFF073B78)),
+    ),
+)
 
 private val DesktopColors = darkColorScheme(
     primary = PixelPurple,
@@ -264,6 +333,9 @@ private fun Sidebar(
         NavigationItem(Icons.Rounded.Favorite, "Liked Songs", state.destination == DesktopDestination.LIKED && state.selectedPlaylistId == null) {
             onNavigate(DesktopDestination.LIKED)
         }
+        NavigationItem(Icons.Rounded.Settings, "Settings", state.destination == DesktopDestination.SETTINGS && state.selectedPlaylistId == null) {
+            onNavigate(DesktopDestination.SETTINGS)
+        }
 
         Spacer(Modifier.height(20.dp))
         Row(
@@ -354,9 +426,122 @@ private fun MainPanel(modifier: Modifier, state: DesktopUiState, controller: Des
                     DesktopDestination.SEARCH -> SearchContent(state, controller)
                     DesktopDestination.LIBRARY -> LibraryContent(state, controller)
                     DesktopDestination.LIKED -> LikedContent(state, controller)
+                    DesktopDestination.SETTINGS -> SettingsContent(state, controller)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsContent(state: DesktopUiState, controller: DesktopController) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 32.dp, vertical = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+    ) {
+        item {
+            Text("Settings", style = MaterialTheme.typography.headlineLarge)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Control notifications and how PixelPlayer behaves in the background.",
+                color = SoftText,
+            )
+        }
+
+        item {
+            SettingsGroup(title = "Notifications") {
+                SettingsToggleRow(
+                    title = "Desktop notifications",
+                    description = "Allow PixelPlayer to send system notifications.",
+                    checked = state.notificationsEnabled,
+                    onCheckedChange = controller::setNotificationsEnabled,
+                )
+                HorizontalDivider(color = Divider)
+                SettingsToggleRow(
+                    title = "Now playing",
+                    description = "Show a notification whenever a new track starts.",
+                    checked = state.nowPlayingNotifications,
+                    enabled = state.notificationsEnabled,
+                    onCheckedChange = controller::setNowPlayingNotifications,
+                )
+                HorizontalDivider(color = Divider)
+                SettingsToggleRow(
+                    title = "Background reminder",
+                    description = "Notify once when closing the window while PixelPlayer stays active.",
+                    checked = state.backgroundNotifications,
+                    enabled = state.notificationsEnabled,
+                    onCheckedChange = controller::setBackgroundNotifications,
+                )
+            }
+        }
+
+        item {
+            SettingsGroup(title = "Window and playback") {
+                SettingsToggleRow(
+                    title = "Keep playing after closing the window",
+                    description = "Hide PixelPlayer in the system tray. Turn this off to quit when the window closes.",
+                    checked = state.closeToTray,
+                    onCheckedChange = controller::setCloseToTray,
+                )
+                HorizontalDivider(color = Divider)
+                SettingsInfoRow(
+                    title = "System media controls",
+                    description = "Enabled — keyboard media keys and the GNOME/KDE media panel control playback.",
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(title, style = MaterialTheme.typography.titleLarge)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(RaisedPanel)
+                .border(1.dp, Divider, RoundedCornerShape(12.dp)),
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, color = if (enabled) Color.White else SoftText)
+            Spacer(Modifier.height(3.dp))
+            Text(description, color = SoftText, fontSize = 12.sp)
+        }
+        Spacer(Modifier.width(20.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+        )
+    }
+}
+
+@Composable
+private fun SettingsInfoRow(title: String, description: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 15.dp)) {
+        Text(title, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(3.dp))
+        Text(description, color = SoftText, fontSize = 12.sp)
     }
 }
 
@@ -402,7 +587,7 @@ private fun HomeContent(state: DesktopUiState, controller: DesktopController) {
         contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        item { HeroCard(state, controller) }
+        item { HomeExploreCategories(controller) }
         if (recentlyPlayed.isNotEmpty()) {
             item {
                 SectionHeading("Recently played", "Pick up exactly where you left off")
@@ -507,60 +692,54 @@ private fun shelfSubtitle(title: String): String = when {
 }
 
 @Composable
-private fun HeroCard(state: DesktopUiState, controller: DesktopController) {
-    val transition = rememberInfiniteTransition()
-    val drift by transition.animateFloat(
-        initialValue = -0.15f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(tween(7_000), AnimationRepeatMode.Reverse),
-    )
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(190.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(Color(0xFF382051), Color(0xFF17121D), Color(0xFF0B0B0D)),
-                    start = Offset.Zero,
-                    end = Offset(1_000f, 600f),
-                ),
-            ),
-    ) {
-        Canvas(Modifier.fillMaxSize().alpha(0.6f)) {
-            drawCircle(PixelPink.copy(alpha = 0.22f), radius = size.minDimension * 0.36f, center = Offset(size.width * drift, size.height * 0.1f))
-            drawCircle(PixelPurple.copy(alpha = 0.25f), radius = size.minDimension * 0.45f, center = Offset(size.width * 0.84f, size.height * 0.9f))
-        }
-        Column(
-            Modifier.align(Alignment.CenterStart).padding(start = 30.dp, end = 230.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text("PIXELPLAYER DESKTOP", color = PixelPurple, fontSize = 10.sp, letterSpacing = 2.0.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            Text("Sound that stays\nout of your way.", fontSize = 32.sp, lineHeight = 35.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(9.dp))
-            Text("Local music and online radio in one calm listening space.", color = SoftText, fontSize = 14.sp)
-            Spacer(Modifier.height(14.dp))
-            Button(
-                onClick = {
-                    val firstSuggestion = state.listeningHistory.firstOrNull()?.song
-                        ?: state.homeShelves.values.firstNotNullOfOrNull { it.firstOrNull() }
-                        ?: state.songs.firstOrNull()
-                    state.player.currentSong?.let { controller.togglePlayPause() }
-                        ?: firstSuggestion?.let { controller.playSong(it, listOf(it)) }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF281033)),
-                shape = RoundedCornerShape(20.dp),
-            ) {
-                Icon(if (state.player.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null)
-                Spacer(Modifier.width(7.dp))
-                Text(if (state.player.currentSong == null) "Start listening" else "Continue listening", fontWeight = FontWeight.SemiBold)
+private fun HomeExploreCategories(controller: DesktopController) {
+    Column(Modifier.fillMaxWidth()) {
+        SectionHeading("Explore online", "Choose a category and find playable music")
+        Spacer(Modifier.height(12.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(desktopExploreCategories, key = DesktopExploreCategory::title) { category ->
+                Box(
+                    modifier = Modifier
+                        .width(174.dp)
+                        .height(106.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Brush.linearGradient(category.colors))
+                        .clickable {
+                            controller.updateQuery(category.query)
+                            controller.navigate(DesktopDestination.SEARCH)
+                        },
+                ) {
+                    Icon(
+                        imageVector = category.icon,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.20f),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 8.dp, bottom = 2.dp)
+                            .size(62.dp)
+                            .rotate(12f),
+                    )
+                    Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
+                        Text(
+                            category.title,
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            category.subtitle,
+                            color = Color.White.copy(alpha = 0.76f),
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
-        PixelDisc(
-            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 48.dp).size(136.dp),
-            isPlaying = state.player.isPlaying,
-        )
     }
 }
 

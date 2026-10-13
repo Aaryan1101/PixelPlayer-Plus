@@ -43,6 +43,10 @@ data class DesktopPreferences(
     val listeningHistory: List<ListeningHistoryEntry> = emptyList(),
     val volume: Int = 72,
     val lastSongPath: String? = null,
+    val notificationsEnabled: Boolean = true,
+    val nowPlayingNotifications: Boolean = false,
+    val backgroundNotifications: Boolean = true,
+    val closeToTray: Boolean = true,
 )
 
 data class PlayerSnapshot(
@@ -59,4 +63,5 @@ enum class DesktopDestination(val label: String) {
     SEARCH("Search"),
     LIBRARY("Your Library"),
     LIKED("Liked Songs"),
+    SETTINGS("Settings"),
 }

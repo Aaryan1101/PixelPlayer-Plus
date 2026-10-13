@@ -5,16 +5,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,27 +19,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,24 +39,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
-import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
-import com.theveloper.pixelplay.presentation.components.BetaInfoBottomSheet
 import com.theveloper.pixelplay.presentation.components.ChangelogBottomSheet
 import com.theveloper.pixelplay.presentation.components.DailyMixSection
 import com.theveloper.pixelplay.presentation.components.HomeGradientTopBar
@@ -77,6 +62,9 @@ import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.components.StatsOverviewCard
 import com.theveloper.pixelplay.presentation.components.subcomps.PlayingEqIcon
 import com.theveloper.pixelplay.presentation.navigation.Screen
+import com.theveloper.pixelplay.presentation.screens.search.components.ExploreCategory
+import com.theveloper.pixelplay.presentation.screens.search.components.ExploreCategoryCard
+import com.theveloper.pixelplay.presentation.screens.search.components.onlineExploreCategories
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StatsViewModel
@@ -84,11 +72,10 @@ import com.theveloper.pixelplay.ui.theme.ExpTitleTypography
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
-// Modern HomeScreen with Featured hero card and Recently played row.
+// Modern HomeScreen with online discovery and recently played content.
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,9 +91,10 @@ fun HomeScreen(
         (context as? android.app.Activity)?.intent?.getBooleanExtra("is_benchmark", false) ?: false
     }
     val statsViewModel: StatsViewModel = hiltViewModel()
-    val allSongs by playerViewModel.allSongsFlow.collectAsState(initial = emptyList())
-    val dailyMixSongs by playerViewModel.dailyMixSongs.collectAsState()
-    val curatedYourMixSongs by playerViewModel.yourMixSongs.collectAsState()
+    val allSongs by playerViewModel.allSongsFlow.collectAsStateWithLifecycle()
+    val dailyMixSongs by playerViewModel.dailyMixSongs.collectAsStateWithLifecycle()
+    val curatedYourMixSongs by playerViewModel.yourMixSongs.collectAsStateWithLifecycle()
+    val roomRecentlyPlayed by playerViewModel.recentlyPlayedSongs.collectAsStateWithLifecycle()
 
     val yourMixSongs = remember(curatedYourMixSongs, dailyMixSongs, allSongs) {
         when {
@@ -120,33 +108,25 @@ fun HomeScreen(
         yourMixSongs.isNotEmpty() || isBenchmarkMode
     }
 
-    val currentSong by remember(playerViewModel.stablePlayerState) {
-        playerViewModel.stablePlayerState.map { it.currentSong }
-    }.collectAsState(initial = null)
-
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
-    val isShuffleEnabled = stablePlayerState.isShuffleEnabled
-
-    val bottomPadding = if (currentSong != null) MiniPlayerHeight else 0.dp
+    val hasCurrentSong by playerViewModel.hasCurrentSong.collectAsStateWithLifecycle()
+    val bottomPadding = if (hasCurrentSong) MiniPlayerHeight else 0.dp
 
     var showOptionsBottomSheet by remember { mutableStateOf(false) }
     var showChangelogBottomSheet by remember { mutableStateOf(false) }
-    var showBetaInfoBottomSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
-    val betaSheetState = rememberModalBottomSheetState()
     val scope = rememberCoroutineScope()
 
-    val weeklyStats by statsViewModel.weeklyOverview.collectAsState()
+    val weeklyStats by statsViewModel.weeklyOverview.collectAsStateWithLifecycle()
 
-    // Recently-played proxy: top songs from this week, fallback to yourMixSongs.
-    val recentlyPlayed: ImmutableList<Song> = remember(weeklyStats, yourMixSongs, allSongs) {
-        val statTopIds = weeklyStats?.topSongs?.map { it.songId }.orEmpty()
-        val byStats = if (statTopIds.isNotEmpty()) {
-            val byId = (allSongs + yourMixSongs).distinctBy { it.id }.associateBy { it.id }
-            statTopIds.mapNotNull { byId[it] }
-        } else emptyList()
-        val combined = (byStats + yourMixSongs).distinctBy { it.id }.take(6)
-        combined.toImmutableList()
+    val recentlyPlayed: ImmutableList<Song> = remember(roomRecentlyPlayed, yourMixSongs) {
+        (roomRecentlyPlayed + yourMixSongs)
+            .distinctBy { it.id }
+            .take(6)
+            .toImmutableList()
+    }
+    val homeExploreCategories = remember {
+        val featuredIds = setOf("trending", "punjabi", "bollywood", "hindi", "chill", "workout")
+        onlineExploreCategories.filter { it.id in featuredIds }
     }
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -164,10 +144,6 @@ fun HomeScreen(
                     onMoreOptionsClick = {
                         showChangelogBottomSheet = true
                     },
-                    onBetaClick = {
-                        showBetaInfoBottomSheet = true
-                    },
-                    onMenuClick = { /* disabled */ }
                 )
             }
         ) { innerPadding ->
@@ -187,25 +163,21 @@ fun HomeScreen(
                     GreetingSection()
                 }
 
-                item(key = "featured_hero") {
-                    FeaturedHeroCard(
-                        songs = yourMixSongs,
-                        isShuffleEnabled = isShuffleEnabled,
-                        onPlay = {
-                            if (yourMixSongs.isNotEmpty()) {
-                                playerViewModel.showAndPlaySong(
-                                    song = yourMixSongs.first(),
-                                    contextSongs = yourMixSongs,
-                                    queueName = "Your Mix"
-                                )
+                item(key = "online_discovery") {
+                    HomeDiscoverySection(
+                        categories = homeExploreCategories,
+                        onCategoryClick = { category ->
+                            playerViewModel.requestExploreSearch(
+                                title = category.title,
+                                query = category.searchQuery
+                            )
+                            navController.navigate(Screen.Search.route) {
+                                launchSingleTop = true
                             }
                         },
-                        onShuffle = {
-                            if (yourMixSongs.isNotEmpty()) {
-                                playerViewModel.playSongsShuffled(
-                                    songsToPlay = yourMixSongs,
-                                    queueName = "Your Mix"
-                                )
+                        onSeeAll = {
+                            navController.navigate(Screen.Search.route) {
+                                launchSingleTop = true
                             }
                         }
                     )
@@ -287,14 +259,6 @@ fun HomeScreen(
             ChangelogBottomSheet()
         }
     }
-    if (showBetaInfoBottomSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showBetaInfoBottomSheet = false },
-            sheetState = betaSheetState
-        ) {
-            BetaInfoBottomSheet()
-        }
-    }
 }
 
 @Composable
@@ -328,139 +292,54 @@ private fun GreetingSection() {
 }
 
 @Composable
-private fun FeaturedHeroCard(
-    songs: ImmutableList<Song>,
-    isShuffleEnabled: Boolean,
-    onPlay: () -> Unit,
-    onShuffle: () -> Unit
+private fun HomeDiscoverySection(
+    categories: List<ExploreCategory>,
+    onCategoryClick: (ExploreCategory) -> Unit,
+    onSeeAll: () -> Unit
 ) {
-    val colors = MaterialTheme.colorScheme
-    val heroArtUri = songs.firstOrNull()?.albumArtUriString
-    val trackCount = songs.size
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .height(280.dp),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.primaryContainer),
-        elevation = CardDefaults.cardElevation(0.dp)
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            // Decorative blurred sphere using the first song's artwork.
-            if (heroArtUri != null) {
-                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                    val sphereSize = maxWidth * 0.85f
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .offset(x = sphereSize * 0.30f, y = (-12).dp)
-                            .size(sphereSize)
-                            .clip(CircleShape)
-                            .blur(28.dp)
-                    ) {
-                        SmartImage(
-                            model = heroArtUri,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            shape = CircleShape,
-                            contentScale = ContentScale.Crop,
-                            targetSize = coil.size.Size(900, 900)
-                        )
-                    }
-                    // Soft gradient overlay so the title remains legible over the sphere.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                brush = Brush.horizontalGradient(
-                                    0.0f to colors.primaryContainer,
-                                    0.55f to colors.primaryContainer.copy(alpha = 0.55f),
-                                    1.0f to Color.Transparent
-                                )
-                            )
-                    )
-                }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text(
+                    text = "Pick a vibe",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Fresh music from online",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                )
             }
+            TextButton(onClick = onSeeAll) {
+                Text(
+                    text = "See all",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        text = "FEATURED · DAILY MIX",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.onPrimaryContainer.copy(alpha = 0.75f),
-                        letterSpacing = 1.5.sp
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "Your\nMix",
-                        style = ExpTitleTypography.displayLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.onPrimaryContainer,
-                        lineHeight = 56.sp
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    val subtitle = if (trackCount > 0) {
-                        "$trackCount tracks · refreshed today"
-                    } else {
-                        "Refreshed today"
-                    }
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onPrimaryContainer.copy(alpha = 0.75f)
-                    )
-                }
+        Spacer(Modifier.height(12.dp))
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Surface(
-                        onClick = onPlay,
-                        shape = CircleShape,
-                        color = colors.onPrimaryContainer,
-                        contentColor = colors.primaryContainer
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.PlayArrow,
-                                contentDescription = null,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Text(
-                                text = "Play",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                    IconButton(
-                        onClick = onShuffle,
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = colors.onPrimaryContainer.copy(alpha = 0.18f),
-                            contentColor = colors.onPrimaryContainer
-                        ),
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.rounded_shuffle_24),
-                            contentDescription = "Shuffle",
-                            tint = if (isShuffleEnabled) colors.tertiary else colors.onPrimaryContainer
-                        )
-                    }
-                }
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(categories, key = ExploreCategory::id) { category ->
+                ExploreCategoryCard(
+                    category = category,
+                    onClick = { onCategoryClick(category) },
+                    modifier = Modifier.width(168.dp)
+                )
             }
         }
     }
@@ -639,15 +518,15 @@ fun SongListItemFavsWrapper(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
+    val playbackIndicator by playerViewModel.playbackIndicatorUiState.collectAsStateWithLifecycle()
     SongListItemFavs(
         modifier = modifier,
         cardCorners = 0.dp,
         title = song.title,
         artist = song.displayArtist,
         albumArtUrl = song.albumArtUriString,
-        isPlaying = stablePlayerState.isPlaying,
-        isCurrentSong = song.id == stablePlayerState.currentSong?.id,
+        isPlaying = playbackIndicator.isPlaying,
+        isCurrentSong = song.id == playbackIndicator.currentSongId,
         onClick = onClick
     )
 }

@@ -19,6 +19,6 @@ class ExampleInstrumentedTest {
     fun useAppContext() {
         // Context of the app under test.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.theveloper.pixelplay", appContext.packageName)
+        assertEquals("io.github.aaryan1101.pixelplayerplus", appContext.packageName)
     }
 }

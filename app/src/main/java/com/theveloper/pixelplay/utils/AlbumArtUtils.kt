@@ -2,6 +2,8 @@ package com.theveloper.pixelplay.utils
 
 import android.content.ContentUris
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.core.content.FileProvider
@@ -9,6 +11,9 @@ import androidx.core.net.toUri
 import com.theveloper.pixelplay.data.database.MusicDao
 import java.io.File
 import java.io.FileInputStream
+import java.security.MessageDigest
+
+private const val MAX_CACHED_ART_EDGE_PX = 1536
 
 object AlbumArtUtils {
 
@@ -51,19 +56,22 @@ object AlbumArtUtils {
             return null
         }
         if (!deepScan) {
+            val referenceFile = File(appContext.cacheDir, "song_art_${songId}.ref")
+            val sharedFile = runCatching {
+                referenceFile.takeIf(File::exists)
+                    ?.readText()
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { File(appContext.cacheDir, it) }
+                    ?.takeIf(File::exists)
+            }.getOrNull()
+            if (sharedFile != null) {
+                return sharedFile.toShareableUri(appContext)
+            }
 
-            // 1. Check if art is already cached
+            // Retain compatibility with caches produced by older releases.
             val cachedFile = File(appContext.cacheDir, "song_art_${songId}.jpg")
             if (cachedFile.exists()) {
-                return try {
-                    FileProvider.getUriForFile(
-                        appContext,
-                        "${appContext.packageName}.provider",
-                        cachedFile
-                    )
-                } catch (e: Exception) {
-                    Uri.fromFile(cachedFile)
-                }
+                return cachedFile.toShareableUri(appContext)
             }
         }
 
@@ -184,22 +192,68 @@ object AlbumArtUtils {
     /**
      * Save embedded art to cache with unique naming
      */
+    @Synchronized
     fun saveAlbumArtToCache(appContext: Context, bytes: ByteArray, songId: Long): Uri {
-        val file = File(appContext.cacheDir, "song_art_${songId}.jpg")
+        val contentHash = MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        val fileName = "album_art_${contentHash}.jpg"
+        val file = File(appContext.cacheDir, fileName)
 
-        file.outputStream().use { outputStream ->
-            outputStream.write(bytes)
+        if (!file.exists()) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+
+            var sampleSize = 1
+            while (
+                bounds.outWidth / sampleSize > MAX_CACHED_ART_EDGE_PX ||
+                bounds.outHeight / sampleSize > MAX_CACHED_ART_EDGE_PX
+            ) {
+                sampleSize *= 2
+            }
+
+            val bitmap = BitmapFactory.decodeByteArray(
+                bytes,
+                0,
+                bytes.size,
+                BitmapFactory.Options().apply {
+                    inSampleSize = sampleSize
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+            )
+
+            val temporaryFile = File(appContext.cacheDir, ".$fileName.tmp")
+            val compressed = bitmap?.let { decoded ->
+                temporaryFile.outputStream().use { outputStream ->
+                    decoded.compress(Bitmap.CompressFormat.JPEG, 88, outputStream)
+                }
+            } == true
+            if (!compressed) {
+                temporaryFile.writeBytes(bytes)
+            }
+            bitmap?.recycle()
+
+            if (!temporaryFile.renameTo(file)) {
+                temporaryFile.copyTo(file, overwrite = true)
+                temporaryFile.delete()
+            }
         }
 
+        // The tiny per-song reference preserves fast lookup while identical
+        // embedded images share one decoded cache file.
+        File(appContext.cacheDir, "song_art_${songId}.ref").writeText(fileName)
+        return file.toShareableUri(appContext)
+    }
+
+    private fun File.toShareableUri(appContext: Context): Uri {
         return try {
             FileProvider.getUriForFile(
                 appContext,
                 "${appContext.packageName}.provider",
-                file
+                this
             )
         } catch (e: Exception) {
-            // Fallback to file URI if FileProvider fails
-            Uri.fromFile(file)
+            Uri.fromFile(this)
         }
     }
 }

@@ -26,6 +26,7 @@ dependencies {
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
     implementation("com.github.hypfvieh:dbus-java-core:5.2.2")
     implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.2.2")
+    implementation("com.dorkbox:SystemTray:4.4")
 
     testImplementation(kotlin("test"))
 }
@@ -43,7 +44,7 @@ compose.desktop {
             modules("java.naming", "java.management", "jdk.unsupported", "jdk.security.auth")
             targetFormats(TargetFormat.Deb)
             packageName = "pixelplayer-desktop"
-            packageVersion = "0.4.5"
+            packageVersion = "2.5.0"
             description = "PixelPlayer desktop music player"
             vendor = "PixelPlayer"
             linux {

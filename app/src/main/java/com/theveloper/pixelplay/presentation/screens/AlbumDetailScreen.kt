@@ -39,7 +39,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -70,6 +69,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
@@ -98,12 +98,12 @@ fun AlbumDetailScreen(
     viewModel: AlbumDetailViewModel = hiltViewModel(),
     playlistViewModel: PlaylistViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val stablePlayerState by playerViewModel.stablePlayerState.collectAsState()
-    val playerSheetState by playerViewModel.sheetState.collectAsState()
-    val favoriteIds by playerViewModel.favoriteSongIds.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val playbackIndicator by playerViewModel.playbackIndicatorUiState.collectAsStateWithLifecycle()
+    val playerSheetState by playerViewModel.sheetState.collectAsStateWithLifecycle()
+    val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
-    val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsState()
+    val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
     val systemNavBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val bottomBarHeightDp = NavBarContentHeight + systemNavBarInset
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
@@ -243,8 +243,8 @@ fun AlbumDetailScreen(
                     items(songs, key = { song -> "album_song_${song.id}" }) { song ->
                         EnhancedSongListItem(
                             song = song,
-                            isCurrentSong = stablePlayerState.currentSong?.id == song.id,
-                            isPlaying = stablePlayerState.isPlaying,
+                            isCurrentSong = playbackIndicator.currentSongId == song.id,
+                            isPlaying = playbackIndicator.isPlaying,
                             onMoreOptionsClick = {
                                 playerViewModel.selectSongForInfo(song)
                                 showSongInfoBottomSheet = true
@@ -337,7 +337,7 @@ fun AlbumDetailScreen(
                 hasDownloadError = playerViewModel.getDownloadState(currentSong.id).error != null
             )
             if (showPlaylistBottomSheet) {
-                val playlistUiState by playlistViewModel.uiState.collectAsState()
+                val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
 
                 PlaylistBottomSheet(
                     playlistUiState = playlistUiState,
